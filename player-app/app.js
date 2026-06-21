@@ -1446,7 +1446,7 @@ const MatchLobby = {
       if (m.agreed_rules && m.phase === 'playing') {
         if (this._matchUnsub) { this._matchUnsub(); this._matchUnsub = null; }
         const opponent = (m.players || []).find(p => p.uid !== user.id);
-        setTimeout(() => this.launchLocalGame(m.agreed_rules, opponent ? opponent.name : 'Opponent'), 1200);
+        setTimeout(() => this.launchOnlineGame(m.id, m.agreed_rules, m.players, opponent ? opponent.name : 'Opponent'), 1200);
       }
     });
   },
@@ -1489,10 +1489,22 @@ const MatchLobby = {
     Db.agreeToRules(matchId, user.id, whichOpts).catch(e => showToast(e.message));
   },
 
-  launchLocalGame(agreedOpts, opponentName) {
+  // Real state-synced multiplayer: every seat in `players` is an actual matched
+  // account, not a bot. Each client opens its own rotated view of the one shared
+  // game_state row in Supabase — see GameBoard.startOnline().
+  launchOnlineGame(matchId, agreedOpts, players, opponentName) {
     this.close();
-    showToast(`Match starting with ${opponentName}'s lobby — agreed rules applied. (Live synced play is coming soon; starting your match now.)`);
-    Store.setGameOpts({
+    const user = Store.getUser();
+    const mySeat = (players || []).findIndex(p => p.uid === user.id);
+    if (mySeat === -1) { showToast('Could not find your seat in this match.'); return; }
+
+    showToast(`Match starting vs ${opponentName}!`);
+    Store.state.page = 'game';
+    updateNavbar();
+    document.getElementById('notifPanel').classList.add('hidden');
+    if (currentTurnTimer) clearInterval(currentTurnTimer);
+
+    GameBoard.startOnline(matchId, {
       timerMode: agreedOpts.timerMode,
       playerCount: agreedOpts.playerCount,
       includeWhot: agreedOpts.includeWhot,
@@ -1505,8 +1517,7 @@ const MatchLobby = {
       cardConfig: agreedOpts.cardConfig,
       timerBaseSec: agreedOpts.timerBaseSec,
       timerIncSec: agreedOpts.timerIncSec
-    });
-    navigate('game');
+    }, mySeat, players);
   }
 };
 

@@ -250,6 +250,16 @@ const Db = {
     return data.id;
   },
 
+  // --- Live synced game state (real moves between real seated players) ---
+
+  setMatchState(matchId, gameState) {
+    return Promise.resolve(supabaseClient.from('matches').update({ game_state: gameState }).eq('id', matchId));
+  },
+
+  listenMatchState(matchId, callback) {
+    return this.listenMatch(matchId, m => callback(m ? m.game_state : null, m));
+  },
+
   async endMatch(matchId, { winnerId, resultByUid, scores = null }) {
     // resultByUid: { [uid]: { result: 'win'|'loss', pointsDelta: number, name } }
     const { error } = await supabaseClient.from('matches').update({

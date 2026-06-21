@@ -108,6 +108,8 @@ const GameBoard = {
 
   // ── BOARD INIT ────────────────────────────────────────────────
   start(state, opts){
+    if(this.online && this.online.unsub) this.online.unsub();
+    this.online = null;
     this.state = state;
     this.opts  = opts||{};
     this.selectedCardId = null;
@@ -147,6 +149,104 @@ const GameBoard = {
         allowSpectators: this.opts.allowSpectators !== false
       }).then(id => { this.matchId = id; }).catch(e => console.warn('Could not open live match doc:', e));
     }
+  },
+
+  // ── ONLINE (real opponent, state-synced via Supabase) ──────────
+  //
+  // The rest of this file always assumes "local seat 0 = me" — checkNextTurn,
+  // onPlayCard, the hand-reveal logic, all of it. Rather than rewrite that,
+  // each online client keeps its OWN rotated VIEW of one shared canonical
+  // state (stored in matches.game_state, seats in a fixed absolute order),
+  // where local index 0 always maps to whichever absolute seat is really me.
+  // Local mutations get un-rotated back to canonical before being written back,
+  // so the existing single-player code runs completely unaware it's online.
+  _rotateState(state, offset) {
+    const n = state.players.length;
+    if (!offset) return state;
+    const map = (i) => (i + offset) % n; // local index -> canonical index it holds
+    const inv = (i) => (i - offset + n) % n; // canonical index -> local index
+    return {
+      ...state,
+      players: state.players.map((_, localIdx) => ({ ...state.players[map(localIdx)], id: localIdx })),
+      currentPlayer: inv(state.currentPlayer),
+      winner: (state.winner !== null && state.winner !== undefined) ? inv(state.winner) : state.winner,
+      eliminated: (state.eliminated || []).map(inv)
+    };
+  },
+  _unrotateState(state, offset) {
+    const n = state.players.length;
+    return this._rotateState(state, (n - offset) % n);
+  },
+  _pushOnlineState() {
+    if (!this.online) return;
+    Db.setMatchState(this.online.matchId, this._unrotateState(this.state, this.online.mySeat))
+      .catch(e => console.warn('Could not sync game state:', e));
+  },
+
+  startOnline(matchId, opts, mySeatAbsolute, playersInfo) {
+    this.opts = opts || {};
+    this.online = { matchId, mySeat: mySeatAbsolute, isHost: mySeatAbsolute === 0, playersInfo };
+    this.selectedCardId = null;
+    this.eliminated = [];
+    this.revealAllHands = false;
+    this.inCheckupAnimation = false;
+    this.inMarketAnimation = false;
+    this.isWager = (opts && opts.wager > 0) || false;
+    this.isSpectating = false;
+    this.waitingForWatchChoice = false;
+    this.timerSeconds = {};
+    this.timerIncSec = (opts && opts.timerIncSec) || 0;
+    this.matchId = matchId;
+    this._hostInitDone = false;
+    this._onlineBoardBuilt = false;
+
+    const container = document.getElementById('pageContainer');
+    container.innerHTML = '';
+    const board = document.createElement('div');
+    board.className = 'game-board slide-up';
+    board.id = 'gameBoard';
+    board.innerHTML = '<div style="padding:5rem; text-align:center; font-size:1.2rem;">⏳ Connecting to your match...</div>';
+    container.appendChild(board);
+
+    this.online.unsub = Db.listenMatchState(matchId, (canonicalState) => {
+      if (!canonicalState) {
+        if (this.online.isHost) this._hostInitOnlineGame(playersInfo);
+        return;
+      }
+      this._applyIncomingCanonicalState(canonicalState);
+    });
+  },
+
+  _hostInitOnlineGame(playersInfo) {
+    if (this._hostInitDone) return;
+    this._hostInitDone = true;
+    const state = WhotEngine.createGame(playersInfo.length, this.opts);
+    state.players = state.players.map((p, i) => ({ ...p, name: playersInfo[i].name, isHuman: true }));
+    Db.setMatchState(this.online.matchId, state).catch(e => console.warn('Could not start online game:', e));
+  },
+
+  _applyIncomingCanonicalState(canonicalState) {
+    const prevEliminatedCount = this.state ? (this.state.eliminated || []).length : 0;
+    this.state = this._rotateState(canonicalState, this.online.mySeat);
+    this.eliminated = this.state.eliminated || [];
+
+    if (!this._onlineBoardBuilt) {
+      this._onlineBoardBuilt = true;
+      document.getElementById('gameBoard').innerHTML = this._boardHTML();
+      const tMap = { bullet:60, blitz:180, rapid:600, classical:1800, unlimited:9999 };
+      const tSec = this.opts.timerBaseSec || tMap[this.opts.timerMode || 'rapid'] || 600;
+      this.state.players.forEach((_, i) => { if (this.timerSeconds[i] === undefined) this.timerSeconds[i] = tSec; });
+      this.startTimers();
+      SoundEngine.play('deal');
+    } else if (this.eliminated.length > prevEliminatedCount) {
+      this.showToast('A player was eliminated — new round dealt.');
+    }
+
+    this.updateUI();
+    // Only the host reacts to deck-empty here — otherwise every incoming sync
+    // update while the deck stays empty would re-trigger the notice on the
+    // non-host client while it waits for the host's checkup to resolve.
+    if (!this.state.gameOver && this.online.isHost) this._checkEmptyDeck();
   },
 
   _boardHTML(){
@@ -563,6 +663,11 @@ const GameBoard = {
 
   onCheckUp(force = false){
     if(!force && (this.state.currentPlayer!==0 || this.state.gameOver || this.inCheckupAnimation)) return;
+    // Auto-triggered checkups (deck emptied, hand-emptying win) can fire on both
+    // clients' copies of the same synced state at once — only the host actually
+    // runs the counting/elimination sequence online; everyone else just gets the
+    // resulting state once it's pushed.
+    if(force && this.online && !this.online.isHost) return;
 
     this.inCheckupAnimation = true;
     this.revealAllHands = true;
@@ -720,6 +825,7 @@ const GameBoard = {
       this.inCheckupAnimation = false;
       this.state.gameOver = true;
       this.showGameOver(this.state.winner, scored);
+      this._pushOnlineState();
       return;
     }
 
@@ -741,6 +847,7 @@ const GameBoard = {
       this.state.gameOver = true;
       this.state.winner = classicWinner;
       this.showGameOver(classicWinner, scored);
+      this._pushOnlineState();
     } else {
       scored.sort((a,b) => b.score - a.score);
       const maxScore = scored[0].score;
@@ -770,6 +877,7 @@ const GameBoard = {
           this.state.gameOver = true;
           this.state.winner = winner;
           this.showGameOver(winner, null);
+          this._pushOnlineState();
         } else {
           this.state.players.forEach(p => {
             p.handScore = undefined;
@@ -779,6 +887,7 @@ const GameBoard = {
           this.state = WhotEngine.dealNextRound(this.state);
           this._resetRoundTimers();
           this.updateUI();
+          this._pushOnlineState();
           this.checkNextTurn();
         }
       }, 2000);
@@ -849,6 +958,7 @@ const GameBoard = {
 
       this._checkCardEffects(pIdx);
       this.updateUI();
+      this._pushOnlineState();
 
       if(this.state.gameOver){
         const activeCount = this.state.players.filter(p => !this.eliminated.includes(p.id)).length;
@@ -860,6 +970,7 @@ const GameBoard = {
           // Tournament round win with 3+ players still in: this player is safe,
           // but the match isn't over — count everyone else and eliminate the worst hand
           this.state.gameOver = false;
+          this._pushOnlineState();
           this.onCheckUp(true);
         }
       } else if (!this.inMarketAnimation) {
@@ -905,6 +1016,7 @@ const GameBoard = {
         this.state = WhotEngine.drawCard(this.state, pIdx);
         this._applyIncrement(pIdx);
         this.updateUI();
+        this._pushOnlineState();
         if(!this.state.gameOver){
           if (!this._checkEmptyDeck()) {
             this.checkNextTurn();
@@ -1013,6 +1125,7 @@ const GameBoard = {
     if(active.length === 1){
       this.state.gameOver = true;
       this.showGameOver(active[0].id, null);
+      this._pushOnlineState();
       return;
     }
 
@@ -1020,9 +1133,13 @@ const GameBoard = {
       // Skip eliminated player
       this.state.currentPlayer = WhotEngine.nextPlayer(this.state, cur);
       this.updateUI();
+      this._pushOnlineState();
       this.checkNextTurn();
       return;
     }
+
+    // Online: every other seat is a real person on their own client — never simulate them.
+    if(this.online) return;
 
     // In spectate mode, human (0) is treated as CPU — all turns run automatically
     if(cur !== 0 || this.isSpectating){
@@ -1071,7 +1188,9 @@ const GameBoard = {
         this.timerSeconds[cur]--;
         this.updateUI();
       } else {
-        // Time out = eliminate
+        // Time out = eliminate. Online, only report your OWN timeout — both clients
+        // tick down independently, so reporting an opponent's timeout too could race.
+        if (this.online && cur !== 0) return;
         this.showToast(`${this.state.players[cur].name} timed out!`);
         this.eliminatePlayer(cur);
       }
@@ -1100,6 +1219,7 @@ const GameBoard = {
       if(active.length===1){
         this.state.gameOver=true;
         this.showGameOver(active[0].id, null);
+        this._pushOnlineState();
         return;
       }
 
@@ -1107,6 +1227,7 @@ const GameBoard = {
 
       // If the human player was eliminated, pause the loop and prompt
       if(idx === 0){
+        this._pushOnlineState();
         this.waitingForWatchChoice = true;
         this.showWatchPrompt();
         // showWatchPrompt buttons will call acceptWatch() or exitGame()
@@ -1118,6 +1239,7 @@ const GameBoard = {
       if(this.state.currentPlayer === idx){
         this.state.currentPlayer = WhotEngine.nextPlayer(this.state, idx);
       }
+      this._pushOnlineState();
       // Always resume the loop for remaining active players
       setTimeout(()=>this.checkNextTurn(), 400);
     }
@@ -1211,8 +1333,18 @@ const GameBoard = {
       Store.saveUser(u);
 
       if (typeof Db !== 'undefined' && u.id && !String(u.id).startsWith('guest_')) {
+        let winnerId;
+        if (this.online) {
+          // Map the locally-rotated winner index back to whichever real account that seat is.
+          const n = this.online.playersInfo.length;
+          const canonicalWinnerIdx = (winnerIdx + this.online.mySeat) % n;
+          winnerId = this.online.playersInfo[canonicalWinnerIdx].uid;
+        } else {
+          winnerId = winnerIdx === 0 ? u.id : `cpu-${winnerIdx}`;
+        }
+
         const finish = (matchId) => Db.endMatch(matchId, {
-          winnerId: winnerIdx === 0 ? u.id : `cpu-${winnerIdx}`,
+          winnerId,
           resultByUid: { [u.id]: { result: won ? 'win' : 'loss', pointsDelta, name: u.name } },
           scores
         }).catch(e => console.warn('Could not record match to Supabase:', e));
@@ -1246,11 +1378,21 @@ const GameBoard = {
   refreshHand(){ this.updateUI(); },
   exitGame(){
     if(this.timers.main) clearInterval(this.timers.main);
+    if(this.online && this.online.unsub) { this.online.unsub(); this.online = null; }
     document.getElementById('gameBoard').remove();
     navigate('dashboard');
   },
   playAgain(){
     if(this.timers.main) clearInterval(this.timers.main);
+    if(this.online){
+      // No rematch flow yet for a real matched opponent — just head back to the lobby
+      // to search again, rather than silently starting a solo bot game in its place.
+      if(this.online.unsub) this.online.unsub();
+      this.online = null;
+      document.getElementById('gameBoard').remove();
+      navigate('lobby');
+      return;
+    }
     document.getElementById('gameBoard').remove();
     const st = WhotEngine.createGame(this.state.players.length, this.opts);
     this.start(st, this.opts);
@@ -1276,6 +1418,12 @@ const GameBoard = {
     this.isSpectating = true;
     this.waitingForWatchChoice = false;
     this.showToast('👁️ Spectating — Watch the remaining players!');
+    // Online, the other seats are real people on their own clients — just stop
+    // blocking on the watch prompt and let incoming synced state keep rendering.
+    if(this.online){
+      this.checkNextTurn();
+      return;
+    }
     // Resume the CPU game loop
     if(this.state.currentPlayer===0){
       // Human's slot is now spectated — advance to next CPU
