@@ -76,6 +76,17 @@ function joinLinkFor(competitionId) {
 // Used by the ?join=<id> deep link — fetches the competition directly instead of
 // relying on Store.state.liveCompetitions, which is only populated once the
 // Competitions page's realtime subscription has had time to load.
+// A competition the user joined just got auto-paired by the server (pg_cron) —
+// reuse the same rules-negotiation screen built for online matchmaking, since
+// the pairing mechanics from here on are identical.
+function enterCompetitionMatch(matchId, wager) {
+  navigate('lobby');
+  setTimeout(() => {
+    MatchLobby.open();
+    MatchLobby.enterNegotiation(matchId, { wager: wager || 0 });
+  }, 50);
+}
+
 function joinViaSharedLink(compId) {
   const user = Store.getUser();
   Db.getCompetition(compId).then(comp => {
@@ -1398,28 +1409,40 @@ const MatchLobby = {
     }
   },
 
-  enterNegotiation(matchId) {
+  // `overrides` lets callers outside the normal "Play Online" flow (e.g. a competition
+  // that just got auto-paired server-side) supply the real timer/wager for this specific
+  // match instead of whatever was last left over in the popup's general state.
+  enterNegotiation(matchId, overrides = {}) {
     if (this._searchTimerInterval) { clearInterval(this._searchTimerInterval); this._searchTimerInterval = null; }
     this.matchId = matchId;
     this.step = 'negotiating';
     this.refresh();
 
     const user = Store.getUser();
-    const myOpts = {
-      timerMode: this.category === 'custom' ? 'rapid' : this.category,
-      timerBaseSec: this.baseSec, timerIncSec: this.incSec,
-      playerCount: this.playerCount,
-      includeWhot: this.includeWhot, holdOnCard: this.holdOnCard, allowDefend: this.allowDefend,
-      defenseMode: this.defenseMode, checkupStyle: this.checkupStyle, emptyDeckBehavior: this.emptyDeckBehavior,
-      wager: this.wager,
-      cardConfig: Store.getGameOpts().cardConfig
-    };
-    Db.proposeRules(matchId, user.id, myOpts).catch(e => console.warn('Could not propose rules:', e));
+    let proposed = false;
 
     this._matchUnsub = Db.listenMatch(matchId, m => {
       if (!m) return;
       this._lastMatch = m;
       this.refresh();
+
+      if (!proposed) {
+        proposed = true;
+        const myOpts = {
+          timerMode: overrides.timerMode || (this.category === 'custom' ? 'rapid' : this.category),
+          timerBaseSec: overrides.timerBaseSec || this.baseSec,
+          timerIncSec: overrides.timerIncSec !== undefined ? overrides.timerIncSec : this.incSec,
+          // Player count for this specific match is whoever is actually in it —
+          // never the leftover chip selection from a previous popup session.
+          playerCount: (m.players && m.players.length) || overrides.playerCount || this.playerCount,
+          includeWhot: this.includeWhot, holdOnCard: this.holdOnCard, allowDefend: this.allowDefend,
+          defenseMode: this.defenseMode, checkupStyle: this.checkupStyle, emptyDeckBehavior: this.emptyDeckBehavior,
+          wager: overrides.wager !== undefined ? overrides.wager : this.wager,
+          cardConfig: Store.getGameOpts().cardConfig
+        };
+        Db.proposeRules(matchId, user.id, myOpts).catch(e => console.warn('Could not propose rules:', e));
+      }
+
       if (m.agreed_rules && m.phase === 'playing') {
         if (this._matchUnsub) { this._matchUnsub(); this._matchUnsub = null; }
         const opponent = (m.players || []).find(p => p.uid !== user.id);
@@ -2196,6 +2219,9 @@ function renderCompetitions() {
     allowSpectators: c.allow_spectators,
     entryFeeRaw: c.entry_fee,
     startTimeRaw: c.start_time,
+    status: c.status,
+    matchId: c.match_id,
+    isMine: (c.players || []).includes((Store.getUser() || {}).id),
     live: true
   }));
 
@@ -2293,7 +2319,7 @@ function renderCompetitions() {
 
     <div class="grid-3 mt-3">
       ${comps.map(c => `
-        <div class="comp-card" onclick="joinCompetitionMatch('${c.id}')">
+        <div class="comp-card" ${(c.status==='live' && c.matchId && c.isMine) ? '' : `onclick="joinCompetitionMatch('${c.id}')"`}>
           <div class="flex-between">
             <span class="comp-card-type text-accent">${c.type}</span>
             <span class="prize-badge">${c.prize}</span>
@@ -2306,6 +2332,7 @@ function renderCompetitions() {
             ${c.tribe ? `<span class="tribe-tag tribe-${c.tribe.toLowerCase()}">${c.tribe} Only</span>` : ''}
             ${c.private ? `<span class="private-badge">Private</span>` : ''}
           </div>
+          ${(c.status==='live' && c.matchId && c.isMine) ? `<button class="btn-primary btn-sm mt-2" style="width:100%;" onclick="enterCompetitionMatch('${c.matchId}', ${c.entryFeeRaw || 0})">▶ Enter Match — Paired!</button>` : ''}
         </div>
       `).join('')}
     </div>
