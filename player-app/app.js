@@ -935,7 +935,29 @@ const MatchLobby = {
     }
     if (this._queueUnsub) { this._queueUnsub(); this._queueUnsub = null; }
     if (this._matchUnsub) { this._matchUnsub(); this._matchUnsub = null; }
+    if (this._searchTimerInterval) { clearInterval(this._searchTimerInterval); this._searchTimerInterval = null; }
     this.step = 'pick';
+  },
+  _startSearchCountdown() {
+    if (this._searchTimerInterval) clearInterval(this._searchTimerInterval);
+    this._searchTimerInterval = setInterval(() => {
+      const remaining = this.searchDeadline - Date.now();
+      if (remaining <= 0) {
+        clearInterval(this._searchTimerInterval);
+        this._searchTimerInterval = null;
+        if (this.step === 'searching') {
+          showToast('No match found within an hour — search stopped.');
+          this.close();
+        }
+        return;
+      }
+      const el = document.getElementById('mlSearchCountdown');
+      if (el) {
+        const mins = Math.floor(remaining / 60000);
+        const secs = Math.floor((remaining % 60000) / 1000);
+        el.textContent = `⏳ ${mins}:${secs.toString().padStart(2, '0')} remaining — we'll keep searching until then`;
+      }
+    }, 1000);
   },
   refresh() {
     const body = document.getElementById('matchPopupBody');
@@ -1322,10 +1344,11 @@ const MatchLobby = {
     return `
       <h3>🔎 Searching for opponents...</h3>
       <p class="text-muted text-sm mt-1">Matching you with ${this.playerCount - 1} other player${this.playerCount>2?'s':''} in ${tc.label}${this.gameType === 'pricepool' ? ` · ₦${this.poolAmount.toLocaleString()} pool` : ''}.</p>
+      <p class="text-xs text-muted mt-1" id="mlSearchCountdown">⏳ 60:00 remaining — we'll keep searching until then</p>
       <div class="mt-3" style="text-align:center;">
         <div class="gb-deck-wrap" style="margin:0 auto; cursor:default;"><div class="wcard wcard-back"><div class="wcard-back-inner"><span class="wcard-back-text">Whot</span></div></div></div>
       </div>
-      <button class="btn-ghost btn-sm mt-3" style="width:100%;" onclick="MatchLobby.close()">Cancel Search</button>
+      <button class="btn-ghost btn-sm mt-3" style="width:100%;" onclick="MatchLobby.close()">⏹ Stop Searching</button>
     `;
   },
 
@@ -1346,7 +1369,9 @@ const MatchLobby = {
     }
 
     this.step = 'searching';
+    this.searchDeadline = Date.now() + 60 * 60 * 1000; // wait up to 1 hour before giving up
     this.refresh();
+    this._startSearchCountdown();
 
     try {
       const matchId = await Db.joinMatchmaking({
@@ -1374,6 +1399,7 @@ const MatchLobby = {
   },
 
   enterNegotiation(matchId) {
+    if (this._searchTimerInterval) { clearInterval(this._searchTimerInterval); this._searchTimerInterval = null; }
     this.matchId = matchId;
     this.step = 'negotiating';
     this.refresh();

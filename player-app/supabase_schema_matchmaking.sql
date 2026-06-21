@@ -45,6 +45,11 @@ alter table matches add column if not exists agreed_by text[] default '{}';
 -- Uses FOR UPDATE SKIP LOCKED so two simultaneous callers can't double-claim the
 -- same waiting rows. Returns the new match id if a full group was formed, else null.
 
+-- Postgres treats a function with a different parameter list as a new overload
+-- rather than replacing the old one, so drop the original 8-arg signature first
+-- (idempotent — safe to re-run even if it's already gone or already updated).
+drop function if exists try_match_queue(uuid, text, text, int, int, int, text, boolean);
+
 create or replace function try_match_queue(
   p_user_id uuid,
   p_name text,
