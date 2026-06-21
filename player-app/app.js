@@ -17,6 +17,12 @@ function showShareModal(title, url, note) {
   const existing = document.getElementById('shareLinkModal');
   if (existing) existing.remove();
 
+  const shareText = `Join my NG Whot game: ${title}`;
+  const waUrl = `https://wa.me/?text=${encodeURIComponent(shareText + ' ' + url)}`;
+  const fbUrl = `https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(url)}`;
+  const xUrl = `https://twitter.com/intent/tweet?text=${encodeURIComponent(shareText)}&url=${encodeURIComponent(url)}`;
+  const telegramUrl = `https://t.me/share/url?url=${encodeURIComponent(url)}&text=${encodeURIComponent(shareText)}`;
+
   const div = document.createElement('div');
   div.className = 'modal-overlay';
   div.id = 'shareLinkModal';
@@ -27,14 +33,28 @@ function showShareModal(title, url, note) {
       <div class="form-group mt-2">
         <input type="text" id="shareLinkInput" value="${url}" readonly onclick="this.select()">
       </div>
-      <div class="flex gap-2 mt-3">
+      <div class="flex gap-2 mt-2">
         <button class="btn-primary btn-sm" style="flex:1;" onclick="copyShareLink()">📋 Copy Link</button>
-        <button class="btn-ghost btn-sm" style="flex:1;" onclick="document.getElementById('shareLinkModal').remove()">Close</button>
+        <a class="btn-primary btn-sm" style="flex:1; background:#25D366; text-align:center; text-decoration:none;" href="${waUrl}" target="_blank" rel="noopener">🟢 WhatsApp</a>
       </div>
+      <div class="flex gap-2 mt-2">
+        <a class="btn-ghost btn-sm" style="flex:1; text-align:center; text-decoration:none;" href="${fbUrl}" target="_blank" rel="noopener">Facebook</a>
+        <a class="btn-ghost btn-sm" style="flex:1; text-align:center; text-decoration:none;" href="${xUrl}" target="_blank" rel="noopener">X / Twitter</a>
+        <a class="btn-ghost btn-sm" style="flex:1; text-align:center; text-decoration:none;" href="${telegramUrl}" target="_blank" rel="noopener">Telegram</a>
+      </div>
+      <button class="btn-ghost btn-sm mt-2" id="shareNativeBtn" style="width:100%; display:none;" onclick="shareNative()">📤 More Share Options...</button>
+      <button class="btn-ghost btn-sm mt-2" style="width:100%;" onclick="document.getElementById('shareLinkModal').remove()">Close</button>
     </div>
   `;
   document.body.appendChild(div);
+
+  _pendingShareData = { title, text: shareText, url };
+  if (navigator.share) {
+    document.getElementById('shareNativeBtn').style.display = 'block';
+  }
 }
+
+let _pendingShareData = null;
 
 function copyShareLink() {
   const input = document.getElementById('shareLinkInput');
@@ -43,6 +63,10 @@ function copyShareLink() {
     () => showToast('Link copied!'),
     () => document.execCommand('copy')
   );
+}
+
+function shareNative() {
+  if (_pendingShareData) navigator.share(_pendingShareData).catch(() => {});
 }
 
 function joinLinkFor(competitionId) {
