@@ -1,0 +1,76 @@
+:root {
+  --bg: #09090e;
+  --bg2: #0f0f18;
+  --bg3: #161626;
+  --card: #141c30;
+  --accent: #f43f5e; /* Admin Red */
+  --accent-glow: rgba(244,63,94,0.3);
+  --green: #10b981;
+  --red: #ef4444;
+  --blue: #3b82f6;
+  --text: #f3f4f6;
+  --text2: #9ca3af;
+  --border: rgba(255,255,255,0.06);
+  --radius: 12px;
+  --radius-sm: 6px;
+  --font: 'Outfit', sans-serif;
+  --font-display: 'Orbitron', sans-serif;
+}
+* { margin:0; padding:0; box-sizing:border-box; }
+body { font-family:var(--font); background:var(--bg); color:var(--text); min-height:100vh; overflow-x:hidden; }
+button { cursor:pointer; font-family:var(--font); border:none; outline:none; }
+.hidden { display:none !important; }
+
+/* Navbar */
+.navbar { display:flex; align-items:center; justify-content:space-between; padding:0 2rem; height:64px; background:var(--bg2); border-bottom:1px solid var(--border); }
+.nav-logo { display:flex; align-items:center; gap:10px; }
+.logo-icon { width:34px; height:34px; border-radius:6px; display:flex; align-items:center; justify-content:center; font-family:var(--font-display); font-weight:900; color:#fff; }
+.logo-text { font-family:var(--font-display); font-size:1.15rem; font-weight:700; }
+
+/* Layout */
+.admin-layout { display:grid; grid-template-columns:250px 1fr; min-height:calc(100vh - 64px); }
+.sidebar { background:var(--bg2); border-right:1px solid var(--border); padding:1.5rem 0; }
+.sidebar-item { padding:0.9rem 1.5rem; color:var(--text2); font-weight:500; cursor:pointer; transition:all 0.2s; }
+.sidebar-item:hover, .sidebar-item.active { color:var(--text); background:rgba(244,63,94,0.06); border-right:3px solid var(--accent); }
+.admin-main { padding:2rem; overflow-y:auto; }
+
+/* Dashboard Cards */
+.grid-4 { display:grid; grid-template-columns:repeat(4,1fr); gap:1.25rem; }
+.grid-2 { display:grid; grid-template-columns:1fr 1fr; gap:1.5rem; }
+.stat-card { background:var(--card); border:1px solid var(--border); border-radius:var(--radius); padding:1.25rem; }
+.stat-val { font-size:1.8rem; font-weight:800; color:var(--accent); margin-top:0.25rem; }
+.stat-label { color:var(--text2); font-size:0.85rem; }
+
+/* Panels & Tables */
+.panel { background:var(--card); border:1px solid var(--border); border-radius:var(--radius); padding:1.5rem; margin-top:1.5rem; }
+table { width:100%; border-collapse:collapse; margin-top:1rem; font-size:0.9rem; }
+th, td { padding:0.75rem 1rem; text-align:left; border-bottom:1px solid var(--border); }
+th { color:var(--text2); font-weight:600; font-size:0.8rem; text-transform:uppercase; letter-spacing:0.5px; }
+tr:hover td { background:rgba(255,255,255,0.02); }
+
+/* Badges */
+.badge-status { padding:2px 8px; border-radius:50px; font-size:0.75rem; font-weight:700; }
+.status-active { background:rgba(16,185,129,0.15); color:var(--green); }
+.status-banned { background:rgba(239,68,68,0.15); color:var(--red); }
+.status-pending { background:rgba(244,166,29,0.15); color:#f4a61d; }
+
+/* Buttons */
+.btn-primary { background:var(--accent); color:#fff; font-weight:600; padding:8px 18px; border-radius:6px; transition:all 0.2s; font-size:0.85rem; }
+.btn-primary:hover { opacity:0.9; box-shadow:0 0 10px var(--accent-glow); }
+.btn-ghost { background:transparent; border:1px solid var(--border); color:var(--text); padding:8px 18px; border-radius:6px; font-size:0.85rem; }
+.btn-ghost:hover { border-color:var(--accent); color:var(--accent); }
+.btn-red { background:var(--red); color:#fff; padding:6px 12px; border-radius:4px; font-size:0.8rem; }
+.btn-green { background:var(--green); color:#fff; padding:6px 12px; border-radius:4px; font-size:0.8rem; }
+
+/* Forms */
+.form-group { margin-bottom:1.2rem; }
+.form-group label { display:block; font-size:0.82rem; font-weight:600; color:var(--text2); margin-bottom:0.4rem; }
+.form-group input, .form-group select { width:100%; background:var(--bg2); border:1px solid var(--border); color:var(--text); padding:0.6rem 0.8rem; border-radius:var(--radius-sm); font-family:var(--font); font-size:0.88rem; }
+.form-group input:focus, .form-group select:focus { outline:none; border-color:var(--accent); }
+
+/* Toast */
+.toast { position:fixed; bottom:2rem; right:2rem; background:var(--card); border:1px solid var(--accent); color:var(--text); padding:10px 20px; border-radius:8px; font-weight:600; z-index:999; box-shadow:0 10px 30px rgba(0,0,0,0.5); }
+.flex-between { display:flex; align-items:center; justify-content:space-between; }
+.mt-1 { margin-top:0.5rem; }
+.text-xs { font-size:0.75rem; }
+.text-muted { color:var(--text2); }

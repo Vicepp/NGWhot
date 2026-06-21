@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>NG Whot — Play Whot Online</title>
+  <meta name="description" content="Nigeria's premier Whot card game. Play online, join tournaments, tribal competitions and climb the leaderboard." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800;900&family=Orbitron:wght@400;700;900&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="style.css" />
+  <link rel="stylesheet" href="game.css" />
+</head>
+<body>
+  <div id="app">
+    <nav class="navbar" id="navbar">
+      <div class="nav-logo" onclick="navigate('landing')">
+        <div class="logo-icon">W</div>
+        <span class="logo-text">NG<span class="accent">Whot</span></span>
+      </div>
+      <div class="nav-links" id="navLinks">
+        <a href="#" onclick="navigate('lobby')" class="nav-link">Play</a>
+        <a href="#" onclick="navigate('tournaments')" class="nav-link">Tournaments</a>
+        <a href="#" onclick="navigate('competitions')" class="nav-link">Competitions</a>
+        <a href="#" onclick="navigate('leaderboard')" class="nav-link">Rankings</a>
+      </div>
+      <div class="nav-actions" id="navActions">
+        <button class="btn-ghost" onclick="navigate('auth')">Login</button>
+        <button class="btn-primary" onclick="navigate('auth','register')">Sign Up</button>
+      </div>
+      <div class="nav-user hidden" id="navUser">
+        <div class="nav-wallet" onclick="navigate('wallet')">💰 <span id="walletBal">₦2,500</span></div>
+        <div class="notif-btn" onclick="toggleNotifs()">🔔<span class="badge" id="notifBadge">3</span></div>
+        <div class="nav-avatar" onclick="navigate('dashboard')"><div class="avi" id="navAvi">CK</div></div>
+      </div>
+    </nav>
+
+    <div class="notif-panel hidden" id="notifPanel">
+      <div class="notif-hdr"><span>Notifications</span><button onclick="document.getElementById('notifPanel').classList.add('hidden')">✕</button></div>
+      <div id="notifList"></div>
+    </div>
+
+    <main id="pageContainer"></main>
+    <div class="toast hidden" id="toast"></div>
+  </div>
+  
+  <!-- Supabase JS client -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+
+  <!-- Game Scripts (cache-busted with a version query string so edits during dev always reload) -->
+  <script src="supabase_config.js?v=2"></script>
+  <script src="store.js?v=2"></script>
+  <script src="auth.js?v=2"></script>
+  <script src="db.js?v=2"></script>
+  <script src="engine.js?v=2"></script>
+  <script src="sound.js?v=2"></script>
+  <script src="game_board.js?v=2"></script>
+  <script src="app.js?v=2"></script>
+</body>
+</html>

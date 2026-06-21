@@ -1,0 +1,92 @@
+# Implementation Plan — Card Config, Visual Counting, and Rule Enhancements
+
+This plan outlines the design and coding steps required to:
+1. Implement a detailed **Card Configuration Screen** with dropdowns for action numbers, Yes/No toggle buttons for winning compatibility, and Yes/No toggles for defending compatibility.
+2. Introduce a **visual card counting sequence** (not auto-counted) that flips cards to the center table player-by-player and aggregates their scores before declaring the champion or eliminating a player.
+3. Enforce the **Star Card Multiplier** rule (each star card value multiplied by 2) everywhere in scoring.
+4. Modify the **General Market** rules so the player who played it does not draw a card (only other players draw).
+5. Customize the **Voice Engine** to dynamically announce stacked picks (e.g., "Pick Four", "Pick Six") during stacking defense.
+
+---
+
+## Proposed Changes
+
+### 1. State Store (`player-app/store.js`)
+#### [MODIFY] [store.js](file:///c:/Users/chris/Videos/Agent%20Book/RE%20Agent/NG%20Whot/player-app/store.js)
+- Add default `cardConfig` to `gameOpts` structure:
+  - `pickTwo`: `{ num: 2, win: true, defend: true }`
+  - `pickThree`: `{ num: 5, win: true, defend: true }`
+  - `genMarket`: `{ num: 14, win: true, defend: true }`
+  - `holdOn`: `{ num: 1, win: true, defend: false }`
+  - `suspension`: `{ num: 8, win: true, defend: false }`
+  - `crown`: `{ num: 20, win: true, defend: false }`
+
+---
+
+### 2. Game Logic Engine (`player-app/engine.js`)
+#### [MODIFY] [engine.js](file:///c:/Users/chris/Videos/Agent%20Book/RE%20Agent/NG%20Whot/player-app/engine.js)
+- Add helper methods `getCardAction(card, opts)` and `isWinAllowed(action, opts)` to resolve card actions dynamically using config options.
+- Update `canPlay` so a card cannot be played if it's the last card in hand and is configured as non-winning (`win: false`).
+- Update `canDefend` to verify if the card is configured as defensive.
+- Update `playCard` logic to identify actions dynamically (using `getCardAction`) instead of hardcoded numbers, and prevent checking out on non-winning actions.
+- Modify `_applyGeneralMarket` to exclude the player who played the card from drawing a card (only the rest of the players pick).
+- Update `getCardScore` to correctly double the face value of Star cards (`suit === 'star' ? num * 2 : ...`).
+
+---
+
+### 3. Voice & Sound Engine (`player-app/sound.js`)
+#### [MODIFY] [sound.js](file:///c:/Users/chris/Videos/Agent%20Book/RE%20Agent/NG%20Whot/player-app/sound.js)
+- Update `announce(type, count)` to handle dynamic stacked values. If `count` is provided, instead of hardcoded strings, generate "Pick " + count (e.g. "Pick 4", "Pick 6") and read it dynamically using SpeechSynthesis.
+
+---
+
+### 4. Game Board UI (`player-app/game_board.js`)
+#### [MODIFY] [game_board.js](file:///c:/Users/chris/Videos/Agent%20Book/RE%20Agent/NG%20Whot/player-app/game_board.js)
+- Append the `gbCountingOverlay` HTML template block inside `_boardHTML()`.
+- Update `_checkCardEffects()` to use configured action numbers.
+- Refactor the checkup and checkout routines. When a player empties their hand or declares checkup, instead of instantly ending the game, call a new async method `runVisualCountingSequence()`.
+- Implement `runVisualCountingSequence()`:
+  - Show counting overlay.
+  - Determine turn-based player order starting from the checkout player (or the one who declared checkup).
+  - Sequentially count each player's cards one-by-one by moving them to the center of the board, showing their individual face value and a running sum (highlighting the Star card multiplier).
+  - Update each player's displayed score on the table board.
+  - Close overlay and invoke `showGameOver` or `eliminatePlayer` once all sums are finalized.
+- Pass the current `pendingPickup` count into `SoundEngine.announce` calls.
+
+---
+
+### 5. Lobby Page & Modals (`player-app/app.js`)
+#### [MODIFY] [app.js](file:///c:/Users/chris/Videos/Agent%20Book/RE%20Agent/NG%20Whot/player-app/app.js)
+- Add a beautiful **"🃏 Card Configuration"** button inside the Match Config panel in `renderLobby()`.
+- Add the `cardConfigModal` HTML overlay template.
+- Implement controller functions for card configuration:
+  - `openCardConfigModal()`: Reads current options from Store and populates the table fields.
+  - `toggleConfigButton(btn)`: Toggles active Yes/No buttons.
+  - `saveCardConfig()`: Compiles form elements, updates store `cardConfig`, and closes the modal.
+  - `loadDefaultCardConfig()`: Resets to defaults.
+
+---
+
+### 6. Stylesheets (`player-app/game.css`)
+#### [MODIFY] [game.css](file:///c:/Users/chris/Videos/Agent%20Book/RE%20Agent/NG%20Whot/player-app/game.css)
+- Add styled rules for `.card-config-modal-box` matching the premium mobile app theme (Teal panels, green/red highlight borders, custom close circle).
+- Add layout/style rules for `.gb-counting-overlay`, `.gb-counting-box`, `.gb-counting-cards-container`, and `.counting-highlight` avatar pulses.
+
+---
+
+## Verification Plan
+
+### Automated/Unit Checks
+- Run the simulation in `test_game.js` or via terminal checkups to ensure basic Whot rules are intact.
+
+### Manual Verification
+1. **Lobby & Modal Test**:
+   - Open lobby, tap "Card Configuration".
+   - Select different numbers for Pick two/three/etc. and toggle Win/Defend options.
+   - Verify that clicking "Load default" resets options. Save config and verify options persist.
+2. **Gameplay Test**:
+   - Play a match where General Market is played. Verify that ONLY other players draw cards, and the play-again action operates properly.
+   - Trigger a stacked Pick 2/3 defense. Verify that the Voice announcer calls "Pick Four", "Pick Six", etc.
+   - End the game (checkout or declare checkup). Verify that the visual counting overlay appears.
+   - Verify that cards flip one-by-one to the center, Star card values are multiplied by 2 (e.g. Star 5 adds 10), and the running sum updates in real-time.
+   - Verify the game concludes correctly after all counts complete.

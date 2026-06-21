@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>NG Whot — Admin Control Portal</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Orbitron:wght@600;900&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="app">
+    <nav class="navbar">
+      <div class="nav-logo">
+        <div class="logo-icon" style="background:linear-gradient(135deg, var(--red), var(--purple));">A</div>
+        <span class="logo-text">NGWhot <span class="accent" style="color:var(--red);">Admin</span></span>
+      </div>
+      <div class="nav-actions" id="adminNavActions">
+        <span class="text-xs text-muted">Secured Session</span>
+      </div>
+    </nav>
+
+    <div class="admin-layout">
+      <!-- Sidebar -->
+      <aside class="sidebar">
+        <div class="sidebar-item active" onclick="switchAdminTab(this, 'overview')">📊 Platform Overview</div>
+        <div class="sidebar-item" onclick="switchAdminTab(this, 'users')">👥 User Control</div>
+        <div class="sidebar-item" onclick="switchAdminTab(this, 'competitions')">⚔️ Create Competitions</div>
+        <div class="sidebar-item" onclick="switchAdminTab(this, 'withdrawals')">💰 Wallet & Cashouts</div>
+        <div class="sidebar-item" onclick="switchAdminTab(this, 'settings')">⚙️ Platform Settings</div>
+      </aside>
+
+      <!-- Main Panel -->
+      <main class="admin-main" id="adminContent"></main>
+    </div>
+
+    <div class="toast hidden" id="adminToast"></div>
+  </div>
+  <script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,76 @@
+# NG Whot Game Logic Fixes
+
+## Summary
+
+Several game mechanics and the deck composition are incorrect. This plan fixes all of them.
+
+---
+
+## Issues Identified
+
+### 1. Wrong Deck Composition (engine.js)
+Currently all 5 suits use the same `VALID_NUMS = [1,2,3,4,5,7,8,10,11,12,13,14]` (12 numbers × 5 = 60 cards + 5 Whot = 65 cards). It must be:
+
+| Suit     | Numbers                                       | Count |
+|----------|-----------------------------------------------|-------|
+| Circle   | 1,2,3,4,5,7,8,10,11,12,13,14                 | 12    |
+| Triangle | 1,2,3,4,5,7,8,10,11,12,13,14                 | 12    |
+| Cross    | 1,2,3,5,7,10,11,13,14                        | 9     |
+| Square   | 1,2,3,5,7,10,11,13,14                        | 9     |
+| Star     | 1,2,3,4,5,7,8                                | 7     |
+| WHOT     | 20 (×5)                                      | 5     |
+| **Total**|                                               | **54**|
+
+### 2. Hold On (Card 1) — Wrong Behavior
+- **Current**: Treated same as suspension (skips next player)
+- **Correct**: The player who plays card 1 **plays again immediately** (extra turn, does NOT skip anyone)
+
+### 3. Suspension (Card 8) — Correct but conflated
+- **Current**: Both card 1 and 8 do the same thing ("suspended = true")
+- **Correct**: Card 8 **skips** the next player; player after the skipped player continues
+
+### 4. General Market (Card 14) — Wrong
+- **Current**: Everyone else picks 1 card, then turn advances normally
+- **Correct**: Everyone (including the player who played it) picks 1 card from the deck, then the **same player plays again** (to "cover up" / complete the market)
+
+### 5. Pick 2 / Pick 3 — Missing Defend Mechanic
+- **Current**: No defend option implemented
+- **Correct**:
+  - Pick 2 (card 2): next player can **defend** by playing another `2`, stacking the penalty onto the next player (if `allowDefend` is enabled in config)
+  - Pick 3 (card 5): next player can **defend** by playing another `5`, stacking onto the next player
+  - If no defend card, player picks the full stacked amount and turn moves on
+
+### 6. Lobby Config — Missing "Allow Defend" Toggle
+- Add an `allowDefend` checkbox/toggle in the lobby settings
+- This controls whether players can defend Pick 2 with 2, and Pick 3 with 5
+
+---
+
+## Proposed Changes
+
+### engine.js — [MODIFY]
+- Replace `VALID_NUMS` with per-suit card maps
+- Fix `Hold On` logic: card 1 = player replays (currentPlayer stays same)
+- Fix `Suspension` logic: card 8 = skip next player (suspended flag, advance by 2)
+- Fix `General Market`: everyone picks including the player, then player replays
+- Fix `drawCard`: when `pendingPickup > 0`, if defending is allowed, check if player has a defending card first; if not, they draw the pending amount and turn moves on
+
+### game_board.js — [MODIFY]
+- Fix `_checkCardEffects` to properly describe Hold On vs. Suspension
+- Fix `cpuTurn` to handle defend logic for Pick 2/3
+- Add defend card logic to `onPlayCard` (UI should allow playing a 2 or 5 as defend when pendingPickup > 0)
+
+### app.js — [MODIFY]
+- Add `allowDefend` toggle to the lobby form
+- Pass `allowDefend` to `Store.setGameOpts` 
+- Update rules modal text to describe defend mechanic
+
+---
+
+## Verification
+1. Start a new game and confirm deck has exactly 54 cards (Star has 7, Cross/Square have 9, Circle/Triangle have 12, plus 5 Whot)
+2. Play card 1 → verify the same player's hand is still interactive
+3. Play card 8 → verify the next player is skipped
+4. Play card 14 → verify all players pick a card including the player who played it, then that player plays again
+5. Play card 2 → if opponent has a 2 and defend is enabled, they can play it; otherwise they draw 2
+6. Test stacking: two 2s played in sequence → the next player must draw 4
