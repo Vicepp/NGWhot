@@ -26,7 +26,9 @@ create table if not exists matchmaking_queue (
 );
 
 alter table matchmaking_queue enable row level security;
+drop policy if exists "queue rows are publicly readable" on matchmaking_queue;
 create policy "queue rows are publicly readable" on matchmaking_queue for select using (true);
+drop policy if exists "users manage their own queue row" on matchmaking_queue;
 create policy "users manage their own queue row" on matchmaking_queue for all
   using (auth.uid() = user_id) with check (auth.uid() = user_id);
 

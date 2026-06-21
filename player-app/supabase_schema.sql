@@ -24,8 +24,11 @@ create table if not exists profiles (
 );
 
 alter table profiles enable row level security;
+drop policy if exists "profiles are publicly readable" on profiles;
 create policy "profiles are publicly readable" on profiles for select using (true);
+drop policy if exists "users can insert their own profile" on profiles;
 create policy "users can insert their own profile" on profiles for insert with check (auth.uid() = id);
+drop policy if exists "users can update their own profile" on profiles;
 create policy "users can update their own profile" on profiles for update using (auth.uid() = id);
 
 -- ============================== TRIBES ==============================
@@ -43,9 +46,13 @@ create table if not exists tribes (
 );
 
 alter table tribes enable row level security;
+drop policy if exists "tribes are publicly readable" on tribes;
 create policy "tribes are publicly readable" on tribes for select using (true);
+drop policy if exists "signed-in users can create a tribe" on tribes;
 create policy "signed-in users can create a tribe" on tribes for insert with check (auth.uid() = creator_id);
+drop policy if exists "signed-in users can update tribes (join/leave)" on tribes;
 create policy "signed-in users can update tribes (join/leave)" on tribes for update using (auth.uid() is not null);
+drop policy if exists "creator can delete their tribe" on tribes;
 create policy "creator can delete their tribe" on tribes for delete using (auth.uid() = creator_id);
 
 create table if not exists tribe_chat (
@@ -58,7 +65,9 @@ create table if not exists tribe_chat (
 );
 
 alter table tribe_chat enable row level security;
+drop policy if exists "tribe chat is publicly readable" on tribe_chat;
 create policy "tribe chat is publicly readable" on tribe_chat for select using (true);
+drop policy if exists "signed-in users can post in tribe chat" on tribe_chat;
 create policy "signed-in users can post in tribe chat" on tribe_chat for insert with check (auth.uid() = sender_id);
 
 -- ============================== COMPETITIONS ==============================
@@ -84,12 +93,16 @@ create table if not exists competitions (
 );
 
 alter table competitions enable row level security;
+drop policy if exists "competitions are publicly readable" on competitions;
 create policy "competitions are publicly readable" on competitions for select using (true);
+drop policy if exists "signed-in users can create a competition" on competitions;
 create policy "signed-in users can create a competition" on competitions for insert with check (auth.uid() = creator_id);
 -- Joining a competition arrives as an update to the players array; a full lockdown of
 -- "only the players array changed" needs a Postgres function/trigger, which is a fine
 -- follow-up but isn't required to get a working app running today.
+drop policy if exists "signed-in users can update competitions (join/leave)" on competitions;
 create policy "signed-in users can update competitions (join/leave)" on competitions for update using (auth.uid() is not null);
+drop policy if exists "creator can delete their competition" on competitions;
 create policy "creator can delete their competition" on competitions for delete using (auth.uid() = creator_id);
 
 -- ============================== TOURNAMENTS ==============================
@@ -109,9 +122,13 @@ create table if not exists tournaments (
 );
 
 alter table tournaments enable row level security;
+drop policy if exists "tournaments are publicly readable" on tournaments;
 create policy "tournaments are publicly readable" on tournaments for select using (true);
+drop policy if exists "signed-in users can create a tournament" on tournaments;
 create policy "signed-in users can create a tournament" on tournaments for insert with check (auth.uid() = creator_id);
+drop policy if exists "signed-in users can update tournaments" on tournaments;
 create policy "signed-in users can update tournaments" on tournaments for update using (auth.uid() is not null);
+drop policy if exists "creator can delete their tournament" on tournaments;
 create policy "creator can delete their tournament" on tournaments for delete using (auth.uid() = creator_id);
 
 -- ============================== MATCHES (live room + history + spectating + chat) ==============================
@@ -130,8 +147,11 @@ create table if not exists matches (
 );
 
 alter table matches enable row level security;
+drop policy if exists "matches are publicly readable" on matches;
 create policy "matches are publicly readable" on matches for select using (true);
+drop policy if exists "signed-in users can create matches" on matches;
 create policy "signed-in users can create matches" on matches for insert with check (auth.uid() is not null);
+drop policy if exists "signed-in users can update matches" on matches;
 create policy "signed-in users can update matches" on matches for update using (auth.uid() is not null);
 
 create table if not exists match_spectators (
@@ -143,7 +163,9 @@ create table if not exists match_spectators (
 );
 
 alter table match_spectators enable row level security;
+drop policy if exists "spectator presence is publicly readable" on match_spectators;
 create policy "spectator presence is publicly readable" on match_spectators for select using (true);
+drop policy if exists "users manage their own spectator presence" on match_spectators;
 create policy "users manage their own spectator presence" on match_spectators for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
 
 create table if not exists match_chat (
@@ -156,7 +178,9 @@ create table if not exists match_chat (
 );
 
 alter table match_chat enable row level security;
+drop policy if exists "match chat is publicly readable" on match_chat;
 create policy "match chat is publicly readable" on match_chat for select using (true);
+drop policy if exists "signed-in users can post in match chat" on match_chat;
 create policy "signed-in users can post in match chat" on match_chat for insert with check (auth.uid() = sender_id);
 
 create table if not exists match_history (
@@ -170,7 +194,9 @@ create table if not exists match_history (
 );
 
 alter table match_history enable row level security;
+drop policy if exists "users can read their own play history" on match_history;
 create policy "users can read their own play history" on match_history for select using (auth.uid() = user_id);
+drop policy if exists "users can insert their own play history" on match_history;
 create policy "users can insert their own play history" on match_history for insert with check (auth.uid() = user_id);
 
 -- ============================== REALTIME ==============================
