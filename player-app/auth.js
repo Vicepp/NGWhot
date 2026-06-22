@@ -131,7 +131,11 @@ const Auth = {
           updateNavbar();
 
           if (['auth', 'landing'].includes(Store.state.page)) {
-            navigate('dashboard');
+            if (typeof goToPendingJoinOrDashboard === 'function') {
+              goToPendingJoinOrDashboard();
+            } else {
+              navigate('dashboard');
+            }
           }
         } catch (e) {
           console.error('Error hydrating user profile from session:', e);

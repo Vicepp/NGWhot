@@ -147,6 +147,14 @@ const Db = {
     return Promise.resolve(supabaseClient.from('competitions').update({ status }).eq('id', compId));
   },
 
+  // Pairs a competition immediately if it's ready, instead of waiting up to a
+  // minute for the server's cron sweep. Returns the match id, or null if not ready.
+  async tryPairCompetitionNow(compId) {
+    const { data, error } = await supabaseClient.rpc('try_pair_competition', { p_competition_id: compId });
+    if (error) throw error;
+    return data || null;
+  },
+
   listenCompetitions(callback, { tribeId } = {}) {
     return this._realtimeList('competitions',
       tribeId ? { orderCol: 'created_at', eqCol: 'tribe_id', eqVal: tribeId } : { orderCol: 'created_at' },

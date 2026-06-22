@@ -596,3 +596,58 @@
 .gb-watch-btn.leave:hover {
   background: #ff1744; transform: translateY(-2px);
 }
+
+/* ===== ROTATE-TO-LANDSCAPE PROMPT ===== */
+/* Hidden by default and on desktop; only shown on small screens held in portrait,
+   where there genuinely isn't room for 3-4 player fans + hand + center pile. */
+.gb-rotate-prompt {
+  display: none;
+  position: fixed; inset: 0; z-index: 500;
+  background: rgba(5, 20, 12, 0.97);
+  color: #fff; text-align: center;
+  flex-direction: column; align-items: center; justify-content: center;
+  gap: 12px; padding: 2rem; font-family: 'Outfit', sans-serif;
+}
+.gb-rotate-prompt .gb-rotate-icon { font-size: 3.5rem; animation: gbRotateSpin 1.8s ease-in-out infinite; }
+@keyframes gbRotateSpin { 0%,100% { transform: rotate(0deg); } 50% { transform: rotate(90deg); } }
+
+@media (max-width: 768px) and (orientation: portrait) {
+  .gb-rotate-prompt { display: flex; }
+}
+
+/* ===== MOBILE GAME BOARD SCALING ===== */
+@media (max-width: 768px) {
+  :root { --card-w: 56px; --card-h: 80px; }
+
+  .gb-main-area { padding: 4px; }
+  .gb-topbar { padding: 2px 4px; gap: 4px; }
+  .gb-btn-icon { width: 38px; height: 38px; font-size: 1.05rem; }
+  .gb-tip-pill, .gb-tips-box { font-size: 0.68rem; padding: 4px 8px; max-width: 130px; }
+  .gb-turn-label { font-size: 0.78rem; }
+
+  .gb-avatar { width: 40px; height: 40px; font-size: 1.05rem; }
+  .gb-name-label { font-size: 0.65rem; }
+  .gb-timer-label { font-size: 0.62rem; padding: 1px 4px; }
+  .gb-card-count { width: 17px; height: 17px; font-size: 0.6rem; }
+
+  .gb-fan { height: 56px; width: 36px; }
+  .gb-fan .wcard-back { width: 26px; height: 38px; }
+
+  .gb-opponent-side.left { left: 2px; }
+  .gb-opponent-side.right { right: 2px; }
+  .gb-opponents-row { gap: 14px; }
+
+  .wcard-center svg { width: 32px; height: 32px; }
+  .wcard-num { font-size: 0.68rem; }
+  .wcard-mini-suit { font-size: 0.42rem; }
+
+  .gb-hand { gap: 3px; padding: 4px 6px 2px; }
+  .gb-chat-pane { width: 86vw; }
+}
+
+@media (max-width: 400px) {
+  :root { --card-w: 46px; --card-h: 66px; }
+  .gb-fan { height: 46px; width: 30px; }
+  .gb-fan .wcard-back { width: 22px; height: 32px; }
+  .gb-avatar { width: 34px; height: 34px; font-size: 0.9rem; }
+}

@@ -73,12 +73,22 @@ function joinLinkFor(competitionId) {
   return `${window.location.origin}${window.location.pathname}?join=${competitionId}`;
 }
 
-// Used by the ?join=<id> deep link — fetches the competition directly instead of
-// relying on Store.state.liveCompetitions, which is only populated once the
-// Competitions page's realtime subscription has had time to load.
-// A competition the user joined just got auto-paired by the server (pg_cron) —
-// reuse the same rules-negotiation screen built for online matchmaking, since
-// the pairing mechanics from here on are identical.
+// After a successful login/signup, send the user to whatever game invite link they
+// originally clicked (if any) instead of always landing on the generic dashboard.
+function goToPendingJoinOrDashboard() {
+  const pending = sessionStorage.getItem('pendingJoinId');
+  if (pending) {
+    sessionStorage.removeItem('pendingJoinId');
+    navigate('matchAccept', pending);
+  } else {
+    navigate('dashboard');
+  }
+}
+
+// A competition the user joined just got auto-paired (by the server's cron sweep,
+// or by tryPairCompetitionNow right after accepting an invite) — reuse the same
+// "Match Found!" screen built for online matchmaking, since from here on the
+// pairing mechanics (default rules, launch) are identical.
 function enterCompetitionMatch(matchId, wager) {
   navigate('lobby');
   setTimeout(() => {
@@ -87,18 +97,74 @@ function enterCompetitionMatch(matchId, wager) {
   }, 50);
 }
 
-function joinViaSharedLink(compId) {
-  const user = Store.getUser();
+// Dedicated landing page for a shared "join this game" link (?join=<id>) — shows
+// the actual game being invited to and an explicit Accept button, instead of
+// silently joining and dumping the user on the general dashboard/competitions list.
+function renderMatchAccept(compId) {
+  const div = document.createElement('div');
+  div.className = 'fade-in';
+  div.innerHTML = `<div class="panel" style="max-width:480px; margin:3rem auto; text-align:center;" id="matchAcceptBox"><p class="text-muted">Loading game invite...</p></div>`;
+
   Db.getCompetition(compId).then(comp => {
-    if (!comp) { showToast('That game link is no longer valid.'); return; }
-    if (comp.entry_fee && user.wallet < comp.entry_fee) {
-      showToast('Insufficient wallet balance to join this monetized competition.');
+    const box = div.querySelector('#matchAcceptBox');
+    if (!box) return; // user navigated away before this resolved
+    if (!comp) {
+      box.innerHTML = `
+        <div style="font-size:2.5rem;">⚠️</div>
+        <h2 class="mt-2">Game link no longer valid</h2>
+        <button class="btn-ghost mt-3" style="width:100%;" onclick="navigate('dashboard')">Back to Dashboard</button>
+      `;
       return;
     }
-    return Db.joinCompetition(compId, user.id).then(() => {
-      showToast(`Joined "${comp.name}"!`);
-    });
-  }).catch(err => showToast(err.message));
+
+    const user = Store.getUser();
+    const alreadyIn = (comp.players || []).includes(user.id);
+
+    box.innerHTML = `
+      <div style="font-size:2.5rem;">🎮</div>
+      <h2 class="mt-2">${comp.name}</h2>
+      <p class="text-muted text-sm mt-1">Hosted by ${comp.creator_name || 'a player'}</p>
+      <p class="text-muted text-xs mt-2">Players: ${(comp.players || []).length}/${comp.max_players} ${comp.entry_fee ? `· Entry: ₦${comp.entry_fee}` : '· Free'}</p>
+      ${comp.match_id ? `
+        <button class="btn-primary mt-3" style="width:100%;" onclick="enterCompetitionMatch('${comp.match_id}', ${comp.entry_fee || 0})">▶ Enter Match — Already Paired!</button>
+      ` : alreadyIn ? `
+        <p class="text-xs text-muted mt-3">You're in — waiting for more players to join...</p>
+        <button class="btn-ghost btn-sm mt-2" style="width:100%;" onclick="navigate('matchAccept','${compId}')">🔄 Check Again</button>
+      ` : `
+        <button class="btn-primary mt-3" style="width:100%;" onclick="acceptGameInvite('${compId}')">✅ Accept & Join Game</button>
+      `}
+      <button class="btn-ghost btn-sm mt-2" style="width:100%;" onclick="navigate('dashboard')">Not now</button>
+    `;
+  }).catch(err => {
+    const box = div.querySelector('#matchAcceptBox');
+    if (box) box.innerHTML = `<p class="text-muted">${err.message}</p>`;
+  });
+
+  return div;
+}
+
+async function acceptGameInvite(compId) {
+  const user = Store.getUser();
+  try {
+    const comp = await Db.getCompetition(compId);
+    if (!comp) { showToast('That game link is no longer valid.'); return; }
+    if (comp.entry_fee && user.wallet < comp.entry_fee) {
+      showToast(`Wallet is below ₦${comp.entry_fee} — fund your wallet first.`);
+      return;
+    }
+
+    await Db.joinCompetition(compId, user.id);
+    showToast('Joined! Checking if the game can start...');
+
+    const matchId = await Db.tryPairCompetitionNow(compId);
+    if (matchId) {
+      enterCompetitionMatch(matchId, comp.entry_fee || 0);
+    } else {
+      navigate('matchAccept', compId);
+    }
+  } catch (err) {
+    showToast(err.message);
+  }
 }
 
 // Router
@@ -141,6 +207,10 @@ function navigate(page, arg = null) {
       GameBoard.start(WhotEngine.createGame(opts.playerCount, opts), opts);
       break;
     }
+    case 'matchAccept':
+      if (!Store.isLoggedIn()) { navigate('auth'); return; }
+      container.appendChild(renderMatchAccept(arg));
+      break;
     case 'tournaments':
       container.appendChild(renderTournaments());
       break;
@@ -341,7 +411,7 @@ function renderAuth(mode = 'login') {
     }
 
     if (success) {
-      navigate('dashboard');
+      goToPendingJoinOrDashboard();
     } else {
       btn.innerText = origText;
       btn.disabled = false;
@@ -1409,9 +1479,14 @@ const MatchLobby = {
     }
   },
 
+  // No more per-match rule negotiation — every online match just uses the app's
+  // default mechanics (Whot 20 on, Hold On card 1, defending on, stack penalties,
+  // tournament checkup style, default card config) plus whatever timer/player-count
+  // the searching player picked. Whichever seat is absolute index 0 ("host", same
+  // for every client reading the same match row) decides immediately and everyone
+  // else just waits the moment or two for that to land — no buttons, no choosing.
   // `overrides` lets callers outside the normal "Play Online" flow (e.g. a competition
-  // that just got auto-paired server-side) supply the real timer/wager for this specific
-  // match instead of whatever was last left over in the popup's general state.
+  // invite that just got paired) supply the real timer/wager for this specific match.
   enterNegotiation(matchId, overrides = {}) {
     if (this._searchTimerInterval) { clearInterval(this._searchTimerInterval); this._searchTimerInterval = null; }
     this.matchId = matchId;
@@ -1419,34 +1494,37 @@ const MatchLobby = {
     this.refresh();
 
     const user = Store.getUser();
-    let proposed = false;
+    let decided = false;
+    let launched = false;
 
     this._matchUnsub = Db.listenMatch(matchId, m => {
       if (!m) return;
       this._lastMatch = m;
       this.refresh();
 
-      if (!proposed) {
-        proposed = true;
-        const myOpts = {
+      const mySeat = (m.players || []).findIndex(p => p.uid === user.id);
+      const isHost = mySeat === 0;
+
+      if (!m.agreed_rules && isHost && !decided) {
+        decided = true;
+        const defaultOpts = {
           timerMode: overrides.timerMode || (this.category === 'custom' ? 'rapid' : this.category),
           timerBaseSec: overrides.timerBaseSec || this.baseSec,
           timerIncSec: overrides.timerIncSec !== undefined ? overrides.timerIncSec : this.incSec,
-          // Player count for this specific match is whoever is actually in it —
-          // never the leftover chip selection from a previous popup session.
           playerCount: (m.players && m.players.length) || overrides.playerCount || this.playerCount,
-          includeWhot: this.includeWhot, holdOnCard: this.holdOnCard, allowDefend: this.allowDefend,
-          defenseMode: this.defenseMode, checkupStyle: this.checkupStyle, emptyDeckBehavior: this.emptyDeckBehavior,
+          includeWhot: true, holdOnCard: 1, allowDefend: true,
+          defenseMode: 'stack', checkupStyle: 'tournament', emptyDeckBehavior: 'reshuffle',
           wager: overrides.wager !== undefined ? overrides.wager : this.wager,
           cardConfig: Store.getGameOpts().cardConfig
         };
-        Db.proposeRules(matchId, user.id, myOpts).catch(e => console.warn('Could not propose rules:', e));
+        Db.agreeToRules(matchId, user.id, defaultOpts).catch(e => console.warn('Could not start match:', e));
       }
 
-      if (m.agreed_rules && m.phase === 'playing') {
+      if (m.agreed_rules && m.phase === 'playing' && !launched) {
+        launched = true;
         if (this._matchUnsub) { this._matchUnsub(); this._matchUnsub = null; }
         const opponent = (m.players || []).find(p => p.uid !== user.id);
-        setTimeout(() => this.launchOnlineGame(m.id, m.agreed_rules, m.players, opponent ? opponent.name : 'Opponent'), 1200);
+        setTimeout(() => this.launchOnlineGame(m.id, m.agreed_rules, m.players, opponent ? opponent.name : 'Opponent'), 800);
       }
     });
   },
@@ -1454,39 +1532,17 @@ const MatchLobby = {
   _negotiatingHTML() {
     const user = Store.getUser();
     const m = this._lastMatch;
-
-    if (m && m.agreed_rules) {
-      return `
-        <h3>🤝 Match Found!</h3>
-        <p class="text-muted text-sm mt-1">Rules agreed — starting your match...</p>
-      `;
-    }
-
-    const players = (m && m.players) || [];
-    const opponent = players.find(p => p.uid !== user.id);
-    const proposals = (m && m.rule_proposals) || {};
-    const myProposal = proposals[user.id];
-    const theirProposal = opponent ? proposals[opponent.uid] : null;
+    const opponent = ((m && m.players) || []).find(p => p.uid !== user.id);
 
     return `
       <h3>🤝 Match Found!</h3>
       <p class="text-muted text-sm mt-1">Opponent: ${opponent ? opponent.name : 'waiting...'}</p>
-      <p class="text-xs text-muted mt-1">Whoever's rules get picked decide the timer, Hold On card, defending, and card actions for this match.</p>
-
-      ${myProposal && theirProposal ? `
-        <div class="flex gap-2 mt-3">
-          <button class="btn-primary btn-sm" style="flex:1;" onclick="MatchLobby.chooseRules('${this.matchId}', MatchLobby._lastMatch.rule_proposals['${user.id}'])">Use My Rules</button>
-          <button class="btn-ghost btn-sm" style="flex:1;" onclick="MatchLobby.chooseRules('${this.matchId}', MatchLobby._lastMatch.rule_proposals['${opponent.uid}'])">Use ${opponent.name}'s Rules</button>
-        </div>
-      ` : `<p class="text-xs text-muted mt-2">Waiting for both players' rule preferences...</p>`}
-
+      <p class="text-xs text-muted mt-1">Starting with default rules — no setup needed.</p>
+      <div class="mt-3" style="text-align:center;">
+        <div class="gb-deck-wrap" style="margin:0 auto; cursor:default;"><div class="wcard wcard-back"><div class="wcard-back-inner"><span class="wcard-back-text">Whot</span></div></div></div>
+      </div>
       <button class="btn-ghost btn-sm mt-3" style="width:100%;" onclick="MatchLobby.close()">Leave Match</button>
     `;
-  },
-
-  chooseRules(matchId, whichOpts) {
-    const user = Store.getUser();
-    Db.agreeToRules(matchId, user.id, whichOpts).catch(e => showToast(e.message));
   },
 
   // Real state-synced multiplayer: every seat in `players` is an actual matched
@@ -2912,11 +2968,17 @@ window.onload = async () => {
 
   if (joinId) {
     if (Store.isLoggedIn() && Store.getUser().id !== 'guest' && !String(Store.getUser().id).startsWith('guest_')) {
-      navigate('competitions');
-      joinViaSharedLink(joinId);
+      navigate('matchAccept', joinId);
     } else {
-      showToast('Log in or sign up to join this game — then come back to this link.');
+      sessionStorage.setItem('pendingJoinId', joinId);
+      showToast('Log in or sign up to join this game.');
       navigate('auth');
+    }
+  } else {
+    const pending = sessionStorage.getItem('pendingJoinId');
+    if (pending && Store.isLoggedIn() && Store.getUser().id !== 'guest' && !String(Store.getUser().id).startsWith('guest_')) {
+      sessionStorage.removeItem('pendingJoinId');
+      navigate('matchAccept', pending);
     }
   }
 };

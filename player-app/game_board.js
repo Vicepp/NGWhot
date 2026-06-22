@@ -252,6 +252,11 @@ const GameBoard = {
   _boardHTML(){
     const user = Store.getUser()||{};
     return `
+      <div class="gb-rotate-prompt" id="gbRotatePrompt">
+        <div class="gb-rotate-icon">📱</div>
+        <div style="font-size:1.1rem; font-weight:700;">Rotate your device to landscape</div>
+        <div style="font-size:0.85rem; opacity:0.8;">The board fits much better sideways.</div>
+      </div>
       <div class="gb-main-area">
         <!-- Top bar -->
         <div class="gb-topbar">
