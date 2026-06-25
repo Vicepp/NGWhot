@@ -223,6 +223,14 @@ const Db = {
     });
   },
 
+  // Keeps the caller's waiting row marked as actively searching. The server purges
+  // (and refuses to match) waiting rows that haven't been heartbeated recently, so a
+  // searcher who closed their tab can no longer be matched as a "ghost" opponent.
+  async heartbeatMatchmaking(uid) {
+    const { error } = await supabaseClient.rpc('heartbeat_queue', { p_user_id: uid });
+    if (error) throw error;
+  },
+
   async cancelMatchmaking(uid) {
     const { error } = await supabaseClient.from('matchmaking_queue').delete().eq('user_id', uid).eq('status', 'waiting');
     if (error) throw error;

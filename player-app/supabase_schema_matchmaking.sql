@@ -22,8 +22,12 @@ create table if not exists matchmaking_queue (
   rated boolean default true,
   status text not null default 'waiting', -- 'waiting' | 'matched' | 'cancelled'
   match_id uuid,
-  created_at timestamptz default now()
+  created_at timestamptz default now(),
+  last_seen timestamptz default now()     -- refreshed by the searching client's heartbeat
 );
+
+-- Idempotent for existing deployments that created the table before last_seen existed.
+alter table matchmaking_queue add column if not exists last_seen timestamptz default now();
 
 alter table matchmaking_queue enable row level security;
 drop policy if exists "queue rows are publicly readable" on matchmaking_queue;
@@ -73,18 +77,31 @@ declare
   v_group_names text[];
   v_match_id uuid;
 begin
-  -- Re-use an existing waiting row for this user instead of creating duplicates.
+  -- Purge abandoned searches. A client that is genuinely still on the "Searching..."
+  -- screen heartbeats its last_seen every ~20s (see Db.heartbeatMatchmaking); a client
+  -- whose tab was closed stops heartbeating. Without this, a fresh searcher would
+  -- instantly "match" with someone who left days ago — landing on a Match Found screen
+  -- whose opponent never shows up (the exact bug users reported). 90s gives lots of
+  -- slack over the 20s heartbeat while still dropping ghosts fast.
+  delete from matchmaking_queue
+    where status = 'waiting' and last_seen < now() - interval '90 seconds';
+
+  -- Re-use an existing waiting row for this user instead of creating duplicates,
+  -- and refresh its last_seen so this caller counts as actively searching right now.
   select id into v_queue_id from matchmaking_queue
     where user_id = p_user_id and status = 'waiting'
     limit 1;
 
   if v_queue_id is null then
-    insert into matchmaking_queue (user_id, name, category, base_sec, inc_sec, player_count, mode, rated, pool_amount)
-    values (p_user_id, p_name, p_category, p_base_sec, p_inc_sec, p_player_count, p_mode, p_rated, p_pool_amount)
+    insert into matchmaking_queue (user_id, name, category, base_sec, inc_sec, player_count, mode, rated, pool_amount, last_seen)
+    values (p_user_id, p_name, p_category, p_base_sec, p_inc_sec, p_player_count, p_mode, p_rated, p_pool_amount, now())
     returning id into v_queue_id;
+  else
+    update matchmaking_queue set last_seen = now() where id = v_queue_id;
   end if;
 
-  -- Try to lock enough matching waiting rows (including this one) to fill the group.
+  -- Try to lock enough matching, *recently-seen* waiting rows (including this one)
+  -- to fill the group.
   select array_agg(id), array_agg(user_id), array_agg(name)
     into v_group_ids, v_group_users, v_group_names
   from (
@@ -95,6 +112,7 @@ begin
       and mode = p_mode
       and rated = p_rated
       and pool_amount = p_pool_amount
+      and last_seen >= now() - interval '90 seconds'
     order by created_at asc
     limit p_player_count
     for update skip locked
@@ -119,4 +137,16 @@ begin
 
   return v_match_id;
 end;
+$$;
+
+-- ============================== HEARTBEAT ==============================
+-- The searching client calls this on a short interval while the "Searching..."
+-- screen is open, marking the player as still actively waiting. Rows that stop
+-- being heartbeated are treated as abandoned by try_match_queue above.
+create or replace function heartbeat_queue(p_user_id uuid) returns void
+language sql
+security definer
+as $$
+  update matchmaking_queue set last_seen = now()
+    where user_id = p_user_id and status = 'waiting';
 $$;

@@ -1001,6 +1001,8 @@ const MatchLobby = {
   _matchUnsub: null,
   _queueUnsub: null,
   _previewCard: null,
+  _ruleFallbackTimer: null,
+  _heartbeatInterval: null,
 
   open() {
     this.step = 'pick';
@@ -1017,6 +1019,8 @@ const MatchLobby = {
     if (this._queueUnsub) { this._queueUnsub(); this._queueUnsub = null; }
     if (this._matchUnsub) { this._matchUnsub(); this._matchUnsub = null; }
     if (this._searchTimerInterval) { clearInterval(this._searchTimerInterval); this._searchTimerInterval = null; }
+    if (this._heartbeatInterval) { clearInterval(this._heartbeatInterval); this._heartbeatInterval = null; }
+    if (this._ruleFallbackTimer) { clearTimeout(this._ruleFallbackTimer); this._ruleFallbackTimer = null; }
     this.step = 'pick';
   },
   _startSearchCountdown() {
@@ -1465,9 +1469,17 @@ const MatchLobby = {
       if (matchId) {
         this.enterNegotiation(matchId);
       } else {
+        // Keep our queue row marked as actively-searching so other players can match
+        // us, and so the server doesn't purge us as an abandoned (ghost) row.
+        if (this._heartbeatInterval) clearInterval(this._heartbeatInterval);
+        this._heartbeatInterval = setInterval(() => {
+          Db.heartbeatMatchmaking(user.id).catch(() => {});
+        }, 20000);
+
         this._queueUnsub = Db.listenMyQueueStatus(user.id, row => {
           if (row && row.status === 'matched' && row.match_id) {
             if (this._queueUnsub) { this._queueUnsub(); this._queueUnsub = null; }
+            if (this._heartbeatInterval) { clearInterval(this._heartbeatInterval); this._heartbeatInterval = null; }
             this.enterNegotiation(row.match_id);
           }
         });
@@ -1497,6 +1509,22 @@ const MatchLobby = {
     let decided = false;
     let launched = false;
 
+    const setDefaultRules = (m) => {
+      if (decided) return;
+      decided = true;
+      const defaultOpts = {
+        timerMode: overrides.timerMode || (this.category === 'custom' ? 'rapid' : this.category),
+        timerBaseSec: overrides.timerBaseSec || this.baseSec,
+        timerIncSec: overrides.timerIncSec !== undefined ? overrides.timerIncSec : this.incSec,
+        playerCount: (m.players && m.players.length) || overrides.playerCount || this.playerCount,
+        includeWhot: true, holdOnCard: 1, allowDefend: true,
+        defenseMode: 'stack', checkupStyle: 'tournament', emptyDeckBehavior: 'reshuffle',
+        wager: overrides.wager !== undefined ? overrides.wager : this.wager,
+        cardConfig: Store.getGameOpts().cardConfig
+      };
+      Db.agreeToRules(matchId, user.id, defaultOpts).catch(e => console.warn('Could not start match:', e));
+    };
+
     this._matchUnsub = Db.listenMatch(matchId, m => {
       if (!m) return;
       this._lastMatch = m;
@@ -1505,23 +1533,25 @@ const MatchLobby = {
       const mySeat = (m.players || []).findIndex(p => p.uid === user.id);
       const isHost = mySeat === 0;
 
-      if (!m.agreed_rules && isHost && !decided) {
-        decided = true;
-        const defaultOpts = {
-          timerMode: overrides.timerMode || (this.category === 'custom' ? 'rapid' : this.category),
-          timerBaseSec: overrides.timerBaseSec || this.baseSec,
-          timerIncSec: overrides.timerIncSec !== undefined ? overrides.timerIncSec : this.incSec,
-          playerCount: (m.players && m.players.length) || overrides.playerCount || this.playerCount,
-          includeWhot: true, holdOnCard: 1, allowDefend: true,
-          defenseMode: 'stack', checkupStyle: 'tournament', emptyDeckBehavior: 'reshuffle',
-          wager: overrides.wager !== undefined ? overrides.wager : this.wager,
-          cardConfig: Store.getGameOpts().cardConfig
-        };
-        Db.agreeToRules(matchId, user.id, defaultOpts).catch(e => console.warn('Could not start match:', e));
+      // Seat 0 ("host") sets the agreed rules immediately. But if the host's client
+      // never does (e.g. it dropped offline right after matching), the other seat
+      // would otherwise wait on "Match Found!" forever — so any seat falls back to
+      // setting them after a short grace period. agreeToRules merges idempotently,
+      // so a double-write is harmless.
+      if (!m.agreed_rules && !decided) {
+        if (isHost) {
+          setDefaultRules(m);
+        } else if (!this._ruleFallbackTimer) {
+          this._ruleFallbackTimer = setTimeout(() => {
+            this._ruleFallbackTimer = null;
+            if (!decided && this._lastMatch && !this._lastMatch.agreed_rules) setDefaultRules(this._lastMatch);
+          }, 4000);
+        }
       }
 
       if (m.agreed_rules && m.phase === 'playing' && !launched) {
         launched = true;
+        if (this._ruleFallbackTimer) { clearTimeout(this._ruleFallbackTimer); this._ruleFallbackTimer = null; }
         if (this._matchUnsub) { this._matchUnsub(); this._matchUnsub = null; }
         const opponent = (m.players || []).find(p => p.uid !== user.id);
         setTimeout(() => this.launchOnlineGame(m.id, m.agreed_rules, m.players, opponent ? opponent.name : 'Opponent'), 800);
