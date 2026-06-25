@@ -107,7 +107,23 @@ const GameBoard = {
   },
 
   // ── BOARD INIT ────────────────────────────────────────────────
+  // Best-effort auto-rotate: only Android Chrome-family browsers support
+  // programmatic orientation lock, and only while in fullscreen. iOS Safari has
+  // no such API at all — for those, the gb-rotate-prompt overlay (CSS-driven,
+  // shown automatically on small portrait screens) is the fallback.
+  _tryLockLandscape(){
+    const el = document.documentElement;
+    const request = el.requestFullscreen || el.webkitRequestFullscreen || el.msRequestFullscreen;
+    if (request) {
+      try { request.call(el).catch(() => {}); } catch(e) {}
+    }
+    if (screen.orientation && screen.orientation.lock) {
+      screen.orientation.lock('landscape').catch(() => {});
+    }
+  },
+
   start(state, opts){
+    this._tryLockLandscape();
     if(this.online && this.online.unsub) this.online.unsub();
     this.online = null;
     this.state = state;
@@ -185,6 +201,7 @@ const GameBoard = {
   },
 
   startOnline(matchId, opts, mySeatAbsolute, playersInfo) {
+    this._tryLockLandscape();
     this.opts = opts || {};
     this.online = { matchId, mySeat: mySeatAbsolute, isHost: mySeatAbsolute === 0, playersInfo };
     this.selectedCardId = null;
@@ -1445,9 +1462,19 @@ const GameBoard = {
     this.handPage = ((this.handPage || 0) + 1) % totalPages;
     this._renderHand();
   },
+  _unlockOrientation(){
+    if (screen.orientation && screen.orientation.unlock) {
+      try { screen.orientation.unlock(); } catch(e) {}
+    }
+    if (document.fullscreenElement && document.exitFullscreen) {
+      document.exitFullscreen().catch(() => {});
+    }
+  },
+
   exitGame(){
     if(this.timers.main) clearInterval(this.timers.main);
     if(this.online && this.online.unsub) { this.online.unsub(); this.online = null; }
+    this._unlockOrientation();
     document.getElementById('gameBoard').remove();
     navigate('dashboard');
   },

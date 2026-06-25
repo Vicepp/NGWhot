@@ -24,6 +24,17 @@
   flex: 1; display: flex; flex-direction: column;
   align-items: center; justify-content: space-between;
   padding: 8px; position: relative; overflow: hidden;
+  min-height: 0; height: 100%;
+}
+
+/* Was previously unstyled — meaning it had no flex context of its own, so the
+   side opponents (position:absolute, top:50%) centered against the WHOLE main
+   area including the topbar, colliding with the settings/chat/exit buttons on
+   short screens, and the hand below it had no guaranteed space at all. */
+.gb-table {
+  flex: 1 1 auto; width: 100%; min-height: 0;
+  display: flex; flex-direction: column; justify-content: space-between;
+  position: relative; overflow: hidden;
 }
 
 /* ===== CHAT PANE ===== */
@@ -69,7 +80,10 @@
   border-radius: 16px; padding: 0 12px; font-weight: 700; cursor: pointer;
 }
 
-@media (max-width: 768px) {
+/* Both conditions catch the mobile drawer treatment: max-width handles narrow
+   portrait phones, max-height handles landscape phones (often >768px WIDE but
+   well under 500px tall — a width-only check misses that case entirely). */
+@media (max-width: 768px), (max-height: 520px) {
   .gb-chat-pane {
     position: absolute; top: 0; right: 0; bottom: 0;
     transform: translateX(100%); z-index: 400;
@@ -652,7 +666,7 @@
 }
 
 /* ===== MOBILE GAME BOARD SCALING ===== */
-@media (max-width: 768px) {
+@media (max-width: 768px), (max-height: 520px) {
   :root { --card-w: 56px; --card-h: 80px; }
 
   .gb-main-area { padding: 4px; }
@@ -679,6 +693,29 @@
 
   .gb-hand { gap: 3px; padding: 4px 6px 2px; }
   .gb-chat-pane { width: 86vw; }
+}
+
+/* Landscape phones specifically: width is often generous but height is tight
+   (e.g. ~700-900px wide, only ~350-430px tall) — squeeze vertical chrome so
+   the hand and bottom HUD are never starved of space. */
+@media (max-height: 480px) and (orientation: landscape) {
+  .gb-topbar { padding: 1px 4px; }
+  .gb-btn-icon { width: 30px; height: 30px; font-size: 0.9rem; }
+  .gb-tip-pill, .gb-tips-box { display: none; } /* tip text isn't worth the vertical space here */
+  .gb-turn-label { font-size: 0.7rem; }
+
+  .gb-avatar { width: 32px; height: 32px; font-size: 0.85rem; }
+  .gb-name-label { font-size: 0.58rem; margin-top: 1px; }
+  .gb-timer-label { font-size: 0.55rem; padding: 0 3px; margin-top: 0; }
+  .gb-fan { height: 42px; width: 28px; }
+  .gb-fan .wcard-back { width: 20px; height: 28px; }
+  .gb-opponents-row { gap: 8px; }
+
+  :root { --card-w: 44px; --card-h: 62px; }
+  .gb-hand { padding: 2px 4px 1px; }
+  .gb-player-info-row { gap: 4px; }
+  .gb-hud { padding: 0 8px; }
+  .gb-btn-refresh { width: 30px; height: 30px; font-size: 0.95rem; }
 }
 
 @media (max-width: 400px) {
