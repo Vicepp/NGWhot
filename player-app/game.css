@@ -647,24 +647,6 @@
   background: #ff1744; transform: translateY(-2px);
 }
 
-/* ===== ROTATE-TO-LANDSCAPE PROMPT ===== */
-/* Hidden by default and on desktop; only shown on small screens held in portrait,
-   where there genuinely isn't room for 3-4 player fans + hand + center pile. */
-.gb-rotate-prompt {
-  display: none;
-  position: fixed; inset: 0; z-index: 500;
-  background: rgba(5, 20, 12, 0.97);
-  color: #fff; text-align: center;
-  flex-direction: column; align-items: center; justify-content: center;
-  gap: 12px; padding: 2rem; font-family: 'Outfit', sans-serif;
-}
-.gb-rotate-prompt .gb-rotate-icon { font-size: 3.5rem; animation: gbRotateSpin 1.8s ease-in-out infinite; }
-@keyframes gbRotateSpin { 0%,100% { transform: rotate(0deg); } 50% { transform: rotate(90deg); } }
-
-@media (max-width: 768px) and (orientation: portrait) {
-  .gb-rotate-prompt { display: flex; }
-}
-
 /* ===== MOBILE GAME BOARD SCALING ===== */
 @media (max-width: 768px), (max-height: 520px) {
   :root { --card-w: 56px; --card-h: 80px; }
