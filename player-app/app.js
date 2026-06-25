@@ -103,7 +103,7 @@ function enterCompetitionMatch(matchId, wager) {
 function renderMatchAccept(compId) {
   const div = document.createElement('div');
   div.className = 'fade-in';
-  div.innerHTML = `<div class="panel" style="max-width:480px; margin:3rem auto; text-align:center;" id="matchAcceptBox"><p class="text-muted">Loading game invite...</p></div>`;
+  div.innerHTML = `<div class="panel" style="max-width:480px; margin:3rem auto; text-align:center;" id="matchAcceptBox"><div class="ld-dual"></div><p class="text-muted mt-2">Loading game invite...</p></div>`;
 
   Db.getCompetition(compId).then(comp => {
     const box = div.querySelector('#matchAcceptBox');
@@ -1427,7 +1427,7 @@ const MatchLobby = {
       <p class="text-muted text-sm mt-1">Matching you with ${this.playerCount - 1} other player${this.playerCount>2?'s':''} in ${tc.label}${this.gameType === 'pricepool' ? ` · ₦${this.poolAmount.toLocaleString()} pool` : ''}.</p>
       <p class="text-xs text-muted mt-1" id="mlSearchCountdown">⏳ 60:00 remaining — we'll keep searching until then</p>
       <div class="mt-3" style="text-align:center;">
-        <div class="gb-deck-wrap" style="margin:0 auto; cursor:default;"><div class="wcard wcard-back"><div class="wcard-back-inner"><span class="wcard-back-text">Whot</span></div></div></div>
+        <div class="ld-dual"></div>
       </div>
       <button class="btn-ghost btn-sm mt-3" style="width:100%;" onclick="MatchLobby.close()">⏹ Stop Searching</button>
     `;

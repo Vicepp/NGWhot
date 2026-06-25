@@ -113,6 +113,7 @@ const GameBoard = {
     this.state = state;
     this.opts  = opts||{};
     this.selectedCardId = null;
+    this.handPage = 0;
     this.eliminated = [];
     this.revealAllHands = false;
     this.inCheckupAnimation = false;
@@ -187,6 +188,7 @@ const GameBoard = {
     this.opts = opts || {};
     this.online = { matchId, mySeat: mySeatAbsolute, isHost: mySeatAbsolute === 0, playersInfo };
     this.selectedCardId = null;
+    this.handPage = 0;
     this.eliminated = [];
     this.revealAllHands = false;
     this.inCheckupAnimation = false;
@@ -205,7 +207,7 @@ const GameBoard = {
     const board = document.createElement('div');
     board.className = 'game-board slide-up';
     board.id = 'gameBoard';
-    board.innerHTML = '<div style="padding:5rem; text-align:center; font-size:1.2rem;">⏳ Connecting to your match...</div>';
+    board.innerHTML = '<div style="padding:5rem; text-align:center;"><div class="ld-dual"></div><div style="margin-top:1.2rem; font-size:1.2rem;">Connecting to your match...</div></div>';
     container.appendChild(board);
 
     this.online.unsub = Db.listenMatchState(matchId, (canonicalState) => {
@@ -307,6 +309,7 @@ const GameBoard = {
             <div class="gb-timer-label" id="gbMyTimer" style="margin-left: 10px;">00:00</div>
           </div>
           <div class="gb-hand" id="gbHand"></div>
+          <div class="gb-hand-page-badge hidden" id="gbHandPageBadge">1/1</div>
         </div>
       </div><!-- End table -->
 
@@ -318,7 +321,7 @@ const GameBoard = {
           <span style="font-size:0.7rem;color:rgba(255,255,255,0.6);margin-left:6px;">Wins:</span>
           <b id="gbWins" style="color:#00e676;">0</b>
         </div>
-        <button class="gb-btn-refresh" title="Refresh" onclick="GameBoard.refreshHand()">&#8635;</button>
+        <button class="gb-btn-refresh" title="Show more cards" onclick="GameBoard.cycleHand()">&#8635;</button>
       </div>
 
 
@@ -394,13 +397,17 @@ const GameBoard = {
       <!-- Chat Pane -->
       <div class="gb-chat-pane" id="gbChatPane">
         <div class="gb-chat-header">
-          💬 Room Chat
+          <div class="gb-chat-tabs">
+            <button class="gb-chat-tab active" id="gbTabChat" onclick="GameBoard.switchChatTab('chat')">💬 Chat</button>
+            <button class="gb-chat-tab" id="gbTabLog" onclick="GameBoard.switchChatTab('log')">📜 Log</button>
+          </div>
           <button class="gb-chat-close" onclick="GameBoard.toggleChat()">✕</button>
         </div>
         <div class="gb-chat-msgs" id="gbChatMsgs">
           <div class="gb-msg gb-msg-system"><span class="who">System:</span> Welcome! Game has started.</div>
         </div>
-        <div class="gb-chat-input-wrap">
+        <div class="gb-chat-msgs hidden" id="gbLogMsgs"></div>
+        <div class="gb-chat-input-wrap" id="gbChatInputWrap">
           <input type="text" placeholder="Say something..." id="gbChatInput" onkeydown="if(event.key==='Enter') GameBoard.sendChatMessage()">
           <button onclick="GameBoard.sendChatMessage()">Send</button>
         </div>
@@ -415,6 +422,7 @@ const GameBoard = {
     this._renderCenter();
     this._renderHand();
     this._updateTurnLabel();
+    if (document.getElementById('gbTabLog')?.classList.contains('active')) this._renderLog();
     // Update player self count
     const myCount = document.getElementById('gbMyCount');
     if(myCount) myCount.textContent = this.state.players[0].hand.length;
@@ -521,10 +529,26 @@ const GameBoard = {
   _renderHand(){
     const hand=document.getElementById('gbHand');
     if(!hand||!this.state) return;
-    const myCards=this.state.players[0].hand;
+    const allCards=this.state.players[0].hand;
     const isMyTurn = this.state.currentPlayer===0;
     const hasPending = this.state.pendingPickup > 0;
     const topCard = this.state.pile[this.state.pile.length-1];
+
+    const pageSize = 7;
+    const totalPages = Math.max(1, Math.ceil(allCards.length / pageSize));
+    if (this.handPage === undefined || this.handPage >= totalPages) this.handPage = 0;
+    const myCards = allCards.slice(this.handPage * pageSize, this.handPage * pageSize + pageSize);
+
+    const pageBadge = document.getElementById('gbHandPageBadge');
+    if (pageBadge) {
+      if (totalPages > 1) {
+        pageBadge.textContent = `${this.handPage + 1}/${totalPages}`;
+        pageBadge.classList.remove('hidden');
+      } else {
+        pageBadge.classList.add('hidden');
+      }
+    }
+
     hand.innerHTML='';
     myCards.forEach((c,i)=>{
       let canPlay = false;
@@ -592,6 +616,39 @@ const GameBoard = {
   toggleChat() {
     const pane = document.getElementById('gbChatPane');
     if (pane) pane.classList.toggle('open');
+  },
+
+  switchChatTab(tab) {
+    const chatMsgs = document.getElementById('gbChatMsgs');
+    const logMsgs = document.getElementById('gbLogMsgs');
+    const inputWrap = document.getElementById('gbChatInputWrap');
+    const tabChat = document.getElementById('gbTabChat');
+    const tabLog = document.getElementById('gbTabLog');
+    if (!chatMsgs || !logMsgs) return;
+
+    if (tab === 'log') {
+      chatMsgs.classList.add('hidden');
+      logMsgs.classList.remove('hidden');
+      if (inputWrap) inputWrap.classList.add('hidden');
+      tabChat.classList.remove('active');
+      tabLog.classList.add('active');
+      this._renderLog();
+    } else {
+      chatMsgs.classList.remove('hidden');
+      logMsgs.classList.add('hidden');
+      if (inputWrap) inputWrap.classList.remove('hidden');
+      tabLog.classList.remove('active');
+      tabChat.classList.add('active');
+    }
+  },
+
+  _renderLog() {
+    const logMsgs = document.getElementById('gbLogMsgs');
+    if (!logMsgs || !this.state || !this.state.log) return;
+    logMsgs.innerHTML = this.state.log.map(line =>
+      `<div class="gb-msg gb-msg-system">${line}</div>`
+    ).join('');
+    logMsgs.scrollTop = logMsgs.scrollHeight;
   },
 
   sendChatMessage() {
@@ -890,6 +947,7 @@ const GameBoard = {
           this.state.winner = null;
           this.showActionBanner(`🏁 Round ${this.eliminated.length + 1} — New Deal!`, '#00BCD4');
           this.state = WhotEngine.dealNextRound(this.state);
+          this.handPage = 0;
           this._resetRoundTimers();
           this.updateUI();
           this._pushOnlineState();
@@ -1381,6 +1439,12 @@ const GameBoard = {
     btn.className = `gb-toggle ${SoundEngine.voiceEnabled?'on':'off'}`;
   },
   refreshHand(){ this.updateUI(); },
+  cycleHand(){
+    const pageSize = 7;
+    const totalPages = Math.max(1, Math.ceil((this.state.players[0].hand.length) / pageSize));
+    this.handPage = ((this.handPage || 0) + 1) % totalPages;
+    this._renderHand();
+  },
   exitGame(){
     if(this.timers.main) clearInterval(this.timers.main);
     if(this.online && this.online.unsub) { this.online.unsub(); this.online = null; }
