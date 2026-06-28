@@ -152,6 +152,19 @@ const WhotEngine = {
       crown:        { num: 20, win: true,  defend: false }
     };
     if (card.suit === 'whot') return 'crown';
+
+    // opts.holdOnCard lets the host swap which of 1/8 is Hold On vs Suspension
+    // (the lobby UI's simple toggle). cardConfig always stores the canonical
+    // 1=holdOn/8=suspension numbers, so apply the swap here — the one place
+    // every caller already routes through — rather than requiring every place
+    // that builds opts to remember to patch cardConfig itself.
+    if (opts.holdOnCard === 8) {
+      const holdOnNum = config.holdOn ? config.holdOn.num : 1;
+      const suspensionNum = config.suspension ? config.suspension.num : 8;
+      if (card.num === holdOnNum) return 'suspension';
+      if (card.num === suspensionNum) return 'holdOn';
+    }
+
     for (const [actionName, actionOpts] of Object.entries(config)) {
       if (actionOpts.num === card.num) {
         return actionName;
@@ -418,6 +431,22 @@ const WhotEngine = {
       if (found) return found;
     }
     return playable[0];
+  },
+
+  // Picks the suit the CPU holds the most of (after the Whot card itself is
+  // removed from consideration) so calling a suit on a Whot-20 is actually
+  // useful instead of a coin flip that often calls a suit it holds none of.
+  aiChooseSuit(handAfterPlayingWhot) {
+    const suits = ['circle', 'triangle', 'cross', 'square', 'star'];
+    const counts = {};
+    handAfterPlayingWhot.forEach(c => {
+      if (c.suit === 'whot') return;
+      counts[c.suit] = (counts[c.suit] || 0) + 1;
+    });
+    const held = suits.filter(s => counts[s] > 0);
+    if (held.length === 0) return suits[Math.floor(Math.random() * suits.length)];
+    held.sort((a, b) => counts[b] - counts[a]);
+    return held[0];
   },
 
   // ── SCORING ───────────────────────────────────────────────────────────────

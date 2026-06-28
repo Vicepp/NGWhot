@@ -183,7 +183,13 @@ const GameBoard = {
   },
   _pushOnlineState() {
     if (!this.online) return;
-    Db.setMatchState(this.online.matchId, this._unrotateState(this.state, this.online.mySeat))
+    // A monotonic seq guards against out-of-order writes: several call sites push
+    // in quick succession (e.g. inside animation timeouts), and with no ordering
+    // guarantee a delayed/stale push could otherwise overwrite a newer state.
+    const canonical = this._unrotateState(this.state, this.online.mySeat);
+    canonical.seq = (this.state.seq || 0) + 1;
+    this.state.seq = canonical.seq;
+    Db.setMatchState(this.online.matchId, canonical)
       .catch(e => console.warn('Could not sync game state:', e));
   },
 
@@ -235,10 +241,18 @@ const GameBoard = {
     this._hostInitDone = true;
     const state = WhotEngine.createGame(playersInfo.length, this.opts);
     state.players = state.players.map((p, i) => ({ ...p, name: playersInfo[i].name, isHuman: true }));
+    state.seq = 1;
     Db.setMatchState(this.online.matchId, state).catch(e => console.warn('Could not start online game:', e));
   },
 
   _applyIncomingCanonicalState(canonicalState) {
+    // Ignore anything not newer than what we've already applied — multiple
+    // _pushOnlineState() calls can fire in quick succession (animation timeouts
+    // aren't strictly ordered), so without this a stale write could clobber a
+    // newer one on whichever client receives them out of order.
+    if (this.state && canonicalState.seq !== undefined && canonicalState.seq <= (this.state.seq || 0)) {
+      return;
+    }
     const prevState = this.state; // rotated view from before this update (null on first load)
     const prevEliminatedCount = prevState ? (prevState.eliminated || []).length : 0;
     this.state = this._rotateState(canonicalState, this.online.mySeat);
@@ -260,10 +274,12 @@ const GameBoard = {
     }
 
     this.updateUI();
-    // Only the host reacts to deck-empty here — otherwise every incoming sync
-    // update while the deck stays empty would re-trigger the notice on the
-    // non-host client while it waits for the host's checkup to resolve.
-    if (!this.state.gameOver && this.online.isHost) this._checkEmptyDeck();
+    // Deliberately NOT calling _checkEmptyDeck() here. Whichever player's own
+    // move actually emptied the deck already triggers checkup directly from
+    // their own _executePlay/_executeDraw — every other client just needs to
+    // wait for that result. Re-detecting the same empty-deck condition here too
+    // used to make BOTH the acting client and the host independently schedule
+    // and run a full checkup/elimination/redeal sequence, racing each other.
   },
 
   // Without this, only the player who actually clicked a card hears/sees the
@@ -564,6 +580,28 @@ const GameBoard = {
     const pageSize = 7;
     const totalPages = Math.max(1, Math.ceil(allCards.length / pageSize));
     if (this.handPage === undefined || this.handPage >= totalPages) this.handPage = 0;
+
+    // If it's my turn and the page I'm looking at has nothing playable on it,
+    // jump once to whichever page does — otherwise a playable card hidden on a
+    // different page just looks like "I have no moves." Only do this once per
+    // turn (not on every render) so the player can still freely browse pages
+    // afterward without getting snapped back.
+    if (isMyTurn) {
+      if (!this._autoJumpedThisTurn) {
+        const isPlayable = (c) => hasPending
+          ? WhotEngine.canDefend(c, topCard, this.state.opts)
+          : WhotEngine.canPlay(c, topCard, this.state.calledSuit, this.state.opts);
+        const currentPageCards = allCards.slice(this.handPage * pageSize, this.handPage * pageSize + pageSize);
+        if (!currentPageCards.some(isPlayable)) {
+          const idx = allCards.findIndex(isPlayable);
+          if (idx !== -1) this.handPage = Math.floor(idx / pageSize);
+        }
+        this._autoJumpedThisTurn = true;
+      }
+    } else {
+      this._autoJumpedThisTurn = false;
+    }
+
     const myCards = allCards.slice(this.handPage * pageSize, this.handPage * pageSize + pageSize);
 
     const pageBadge = document.getElementById('gbHandPageBadge');
@@ -953,11 +991,25 @@ const GameBoard = {
 
     const isFinal = activePlayers.length <= 2;
 
-    if (isFinal && this.state.winner !== null && this.state.winner !== undefined) {
+    if (isFinal) {
+      // Down to the final two — this checkup always ends the match outright,
+      // never eliminates-and-redeals. If nobody emptied their hand to set a
+      // winner (e.g. the deck simply ran out), lowest score wins, same rule as
+      // classic checkup style.
+      let finalWinner = this.state.winner;
+      if (finalWinner === null || finalWinner === undefined) {
+        const lowSorted = [...scored].sort((a, b) => a.score - b.score);
+        const minScore = lowSorted[0].score;
+        const lowCandidates = lowSorted.filter(s => s.score === minScore);
+        finalWinner = lowCandidates.length > 1
+          ? [...lowCandidates].sort((a, b) => this.state.players[a.id].hand.length - this.state.players[b.id].hand.length)[0].id
+          : lowCandidates[0].id;
+      }
       this.revealAllHands = false;
       this.inCheckupAnimation = false;
       this.state.gameOver = true;
-      this.showGameOver(this.state.winner, scored);
+      this.state.winner = finalWinner;
+      this.showGameOver(finalWinner, scored);
       this._pushOnlineState();
       return;
     }
@@ -1317,7 +1369,10 @@ const GameBoard = {
     const cardToPlay = WhotEngine.aiChooseCard(hand, topCard, this.state.calledSuit, this.state.opts);
     if(cardToPlay){
       let call = null;
-      if(cardToPlay.suit==='whot') call = ['circle','triangle','cross','square','star'][Math.floor(Math.random()*5)];
+      if(cardToPlay.suit==='whot') {
+        const remaining = hand.filter(c => c.id !== cardToPlay.id);
+        call = WhotEngine.aiChooseSuit(remaining);
+      }
       this._executePlay(cur, cardToPlay.id, call);
     } else {
       this._executeDraw(cur);
