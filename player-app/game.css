@@ -30,10 +30,16 @@
 /* Was previously unstyled — meaning it had no flex context of its own, so the
    side opponents (position:absolute, top:50%) centered against the WHOLE main
    area including the topbar, colliding with the settings/chat/exit buttons on
-   short screens, and the hand below it had no guaranteed space at all. */
+   short screens, and the hand below it had no guaranteed space at all.
+   justify-content is flex-start (not space-between) deliberately — space-between
+   redistributes gaps based on content height, so the hand/HUD visibly shifted up
+   and down every time an opponent's revealed fan or card count changed size.
+   margin-top:auto on .gb-player-section (below) pins the hand to the bottom edge
+   unconditionally instead, so its position never moves regardless of what's
+   rendered above it. */
 .gb-table {
   flex: 1 1 auto; width: 100%; min-height: 0;
-  display: flex; flex-direction: column; justify-content: space-between;
+  display: flex; flex-direction: column; justify-content: flex-start;
   position: relative; overflow: hidden;
 }
 
@@ -60,6 +66,18 @@
   padding: 4px 8px; border-radius: 6px; transition: all .15s;
 }
 .gb-chat-tab.active { color: var(--gold); background: rgba(255,215,0,0.12); }
+
+/* Brief "someone messaged you" bubble near the chat button — auto-dismisses
+   itself after a couple of seconds rather than sitting there indefinitely. */
+.gb-chat-notify {
+  position: absolute; top: 52px; right: 0; z-index: 50;
+  background: rgba(0,0,0,0.85); border: 1px solid var(--gold);
+  color: #fff; font-size: 0.78rem; font-weight: 600;
+  padding: 6px 12px; border-radius: 10px; white-space: nowrap;
+  max-width: 220px; overflow: hidden; text-overflow: ellipsis;
+  animation: gbNotifyPop 0.2s ease-out;
+}
+@keyframes gbNotifyPop { from { opacity:0; transform: translateY(-6px); } to { opacity:1; transform: translateY(0); } }
 .gb-chat-msgs {
   flex: 1; overflow-y: auto; padding: 12px;
   display: flex; flex-direction: column; gap: 8px;
@@ -292,6 +310,10 @@
 }
 
 /* ===== HAND AREA ===== */
+.gb-player-section {
+  width: 100%; flex-shrink: 0;
+  margin-top: auto; /* pins the hand to the bottom of .gb-table, see note above */
+}
 .gb-hand-wrap {
   width: 100%; display: flex; flex-direction: column;
   align-items: center; flex-shrink: 0;

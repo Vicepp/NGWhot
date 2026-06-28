@@ -108,7 +108,10 @@ const GameBoard = {
 
   // ── BOARD INIT ────────────────────────────────────────────────
   start(state, opts){
-    if(this.online && this.online.unsub) this.online.unsub();
+    if(this.online){
+      if(this.online.unsub) this.online.unsub();
+      if(this.online.chatUnsub) this.online.chatUnsub();
+    }
     this.online = null;
     this.state = state;
     this.opts  = opts||{};
@@ -185,6 +188,10 @@ const GameBoard = {
   },
 
   startOnline(matchId, opts, mySeatAbsolute, playersInfo) {
+    if(this.online){
+      if(this.online.unsub) this.online.unsub();
+      if(this.online.chatUnsub) this.online.chatUnsub();
+    }
     this.opts = opts || {};
     this.online = { matchId, mySeat: mySeatAbsolute, isHost: mySeatAbsolute === 0, playersInfo };
     this.selectedCardId = null;
@@ -217,6 +224,10 @@ const GameBoard = {
       }
       this._applyIncomingCanonicalState(canonicalState);
     });
+
+    this._chatSeenIds = new Set();
+    this._chatFirstLoadDone = false;
+    this.online.chatUnsub = Db.listenMatchChat(matchId, msgs => this._renderChatMsgs(msgs));
   },
 
   _hostInitOnlineGame(playersInfo) {
@@ -228,7 +239,8 @@ const GameBoard = {
   },
 
   _applyIncomingCanonicalState(canonicalState) {
-    const prevEliminatedCount = this.state ? (this.state.eliminated || []).length : 0;
+    const prevState = this.state; // rotated view from before this update (null on first load)
+    const prevEliminatedCount = prevState ? (prevState.eliminated || []).length : 0;
     this.state = this._rotateState(canonicalState, this.online.mySeat);
     this.eliminated = this.state.eliminated || [];
 
@@ -240,8 +252,11 @@ const GameBoard = {
       this.state.players.forEach((_, i) => { if (this.timerSeconds[i] === undefined) this.timerSeconds[i] = tSec; });
       this.startTimers();
       SoundEngine.play('deal');
-    } else if (this.eliminated.length > prevEliminatedCount) {
-      this.showToast('A player was eliminated — new round dealt.');
+    } else {
+      this._announceRemoteAction(prevState, this.state);
+      if (this.eliminated.length > prevEliminatedCount) {
+        this.showToast('A player was eliminated — new round dealt.');
+      }
     }
 
     this.updateUI();
@@ -249,6 +264,22 @@ const GameBoard = {
     // update while the deck stays empty would re-trigger the notice on the
     // non-host client while it waits for the host's checkup to resolve.
     if (!this.state.gameOver && this.online.isHost) this._checkEmptyDeck();
+  },
+
+  // Without this, only the player who actually clicked a card hears/sees the
+  // Pick Two / Hold On / General Market feedback — the player it happened TO got
+  // total silence. Diff the previous synced state against the new one to figure out
+  // who just acted and replay the same banner/sound for everyone else.
+  _announceRemoteAction(prev, next) {
+    if (!prev) return;
+    const actedLocally = prev.currentPlayer; // whoever's turn it was right before this update
+    if (actedLocally === 0) return; // that was MY OWN move — already announced directly in _executePlay
+
+    if (next.pile.length > prev.pile.length) {
+      this._checkCardEffects(actedLocally);
+    } else if (next.deck.length < prev.deck.length) {
+      SoundEngine.play('draw');
+    }
   },
 
   _boardHTML(){
@@ -262,8 +293,9 @@ const GameBoard = {
             <div class="gb-tip-pill" id="gbTips">⚡ Play by suit or number</div>
           </div>
           <div class="gb-turn-label" id="gbTurnLabel">Your turn</div>
-          <div style="display:flex; gap:8px;">
+          <div style="display:flex; gap:8px; position:relative;">
             <button class="gb-btn-icon gb-btn-chat" onclick="GameBoard.toggleChat()">💬</button>
+            <div class="gb-chat-notify hidden" id="gbChatNotify"></div>
             <button class="gb-btn-icon gb-btn-exit" onclick="GameBoard.exitGame()">✕</button>
           </div>
         </div>
@@ -650,15 +682,24 @@ const GameBoard = {
     const input = document.getElementById('gbChatInput');
     const msgs = document.getElementById('gbChatMsgs');
     if(!input || !msgs || !input.value.trim()) return;
-    
+
     const text = input.value.trim();
     input.value = '';
-    
-    // Append my msg
+
+    if (this.online) {
+      // Real message to the real opponent — it (and their replies) arrive back
+      // through the live match_chat subscription, not a simulated bot reply.
+      const user = Store.getUser();
+      Db.sendMatchChat(this.online.matchId, user.id, user.name, text).catch(() => {
+        this.showToast('Could not send — check your connection.');
+      });
+      return;
+    }
+
+    // Offline / vs-bot: there's no real opponent to message, so keep the light
+    // simulated banter for flavor.
     msgs.insertAdjacentHTML('beforeend', `<div class="gb-msg"><span class="who" style="color:#00ff88;">You:</span> ${text}</div>`);
     msgs.scrollTop = msgs.scrollHeight;
-    
-    // Simulate simple reply
     setTimeout(()=>{
       const ops = this.state.players.filter((_,i)=>i!==0);
       if(ops.length===0) return;
@@ -668,6 +709,40 @@ const GameBoard = {
       msgs.insertAdjacentHTML('beforeend', `<div class="gb-msg"><span class="who">${op.name}:</span> ${reply}</div>`);
       msgs.scrollTop = msgs.scrollHeight;
     }, 1500 + Math.random()*1500);
+  },
+
+  // Real chat for online matches — full re-render from the synced message list
+  // (small, bounded by limitToLast in Db.listenMatchChat, so this is cheap).
+  _renderChatMsgs(msgs) {
+    const box = document.getElementById('gbChatMsgs');
+    if (!box) return;
+    const user = Store.getUser() || {};
+
+    box.innerHTML = msgs.map(m => {
+      const mine = m.sender_id === user.id;
+      return `<div class="gb-msg"><span class="who" style="${mine ? 'color:#00ff88;' : ''}">${mine ? 'You' : m.sender_name}:</span> ${m.text}</div>`;
+    }).join('');
+    box.scrollTop = box.scrollHeight;
+
+    // Only pop the notification for a message that arrived AFTER the initial
+    // load of existing history, and that isn't one of my own.
+    const latest = msgs[msgs.length - 1];
+    if (latest && this._chatFirstLoadDone && !this._chatSeenIds.has(latest.id) && latest.sender_id !== user.id) {
+      this._popChatNotify(latest.sender_name, latest.text);
+    }
+    if (latest) this._chatSeenIds.add(latest.id);
+    this._chatFirstLoadDone = true;
+  },
+
+  _popChatNotify(name, text) {
+    const pane = document.getElementById('gbChatPane');
+    if (pane && pane.classList.contains('open')) return; // already looking at it
+    const el = document.getElementById('gbChatNotify');
+    if (!el) return;
+    el.textContent = `💬 ${name}: ${text}`;
+    el.classList.remove('hidden');
+    clearTimeout(this._chatNotifyTimer);
+    this._chatNotifyTimer = setTimeout(() => el.classList.add('hidden'), 2000);
   },
 
   selectCard(id, el){
@@ -720,18 +795,19 @@ const GameBoard = {
 
   onCheckUp(force = false){
     if(!force && (this.state.currentPlayer!==0 || this.state.gameOver || this.inCheckupAnimation)) return;
-    // Auto-triggered checkups (deck emptied, hand-emptying win) can fire on both
-    // clients' copies of the same synced state at once — only the host actually
-    // runs the counting/elimination sequence online; everyone else just gets the
-    // resulting state once it's pushed.
-    if(force && this.online && !this.online.isHost) return;
+    // No host-gating needed here: force=true only ever fires from THIS client's own
+    // direct action (its own move emptied the deck, or its own play emptied its hand) —
+    // never from a remote sync update, so there's no risk of both clients double-firing
+    // this. (The one place that COULD double-fire — both clients reacting to the same
+    // synced deck-empty state — is already host-gated at its call site in
+    // _applyIncomingCanonicalState, not here.)
 
     this.inCheckupAnimation = true;
     this.revealAllHands = true;
     this.updateUI();
 
     this.showActionBanner('📋 CHECK UP!', '#FFD700');
-    SoundEngine.play('deal'); // play general sound
+    SoundEngine.announce('checkup');
 
     setTimeout(() => {
       this.runVisualCountingSequence();
@@ -1084,6 +1160,20 @@ const GameBoard = {
   },
 
   _checkCardEffects(pIdx){
+    // "Last card" countdown — audible to everyone, not just the player it's about,
+    // same idea as calling "UNO!" out loud at the table.
+    const actor = this.state.players[pIdx];
+    if (actor) {
+      const remaining = actor.hand.length;
+      if (remaining === 2) {
+        this.showActionBanner(`⚠️ ${actor.name}: 2 cards left!`, '#FFC107');
+        SoundEngine.announce('warning');
+      } else if (remaining === 1) {
+        this.showActionBanner(`🔥 ${actor.name}: LAST CARD!`, '#FF5722');
+        SoundEngine.announce('lastcard');
+      }
+    }
+
     const len = this.state.pile.length;
     const top = this.state.pile[len-1];
     const prev = len > 1 ? this.state.pile[len-2] : null;
@@ -1237,21 +1327,33 @@ const GameBoard = {
   // ── TIMERS ────────────────────────────────────────────────────
   startTimers(){
     if(this.opts.timerMode==='unlimited') return;
+    this._overtimeTicks = 0;
+    this._overtimeCur = null;
     this.timers.main = setInterval(()=>{
       if(this.state.gameOver) return clearInterval(this.timers.main);
       // Pause the clock entirely while a checkup count or market draw is animating
       if(this.inCheckupAnimation || this.inMarketAnimation || this.waitingForWatchChoice) return;
       const cur = this.state.currentPlayer;
+      if(this._overtimeCur !== cur){ this._overtimeCur = cur; this._overtimeTicks = 0; }
+
       if(this.timerSeconds[cur]>0){
         this.timerSeconds[cur]--;
         this.updateUI();
-      } else {
-        // Time out = eliminate. Online, only report your OWN timeout — both clients
-        // tick down independently, so reporting an opponent's timeout too could race.
-        if (this.online && cur !== 0) return;
-        this.showToast(`${this.state.players[cur].name} timed out!`);
-        this.eliminatePlayer(cur);
+        return;
       }
+
+      // Time's up. Online, the timed-out player's own client should self-report
+      // almost immediately — but if their tab is frozen/closed, nobody ever would,
+      // and the match would hang forever (exactly the bug reported: timeouts not
+      // eliminating in live matches). Give them a few seconds of slack for normal
+      // network lag, then let the host step in as a fallback — host-only so two
+      // clients can't both race to eliminate the same player.
+      if (this.online && cur !== 0) {
+        this._overtimeTicks++;
+        if (this._overtimeTicks < 8 || !this.online.isHost) return;
+      }
+      this.showToast(`${this.state.players[cur].name} timed out!`);
+      this.eliminatePlayer(cur);
     }, 1000);
   },
 
@@ -1442,7 +1544,11 @@ const GameBoard = {
   },
   exitGame(){
     if(this.timers.main) clearInterval(this.timers.main);
-    if(this.online && this.online.unsub) { this.online.unsub(); this.online = null; }
+    if(this.online){
+      if(this.online.unsub) this.online.unsub();
+      if(this.online.chatUnsub) this.online.chatUnsub();
+      this.online = null;
+    }
     document.getElementById('gameBoard').remove();
     navigate('dashboard');
   },
@@ -1452,6 +1558,7 @@ const GameBoard = {
       // No rematch flow yet for a real matched opponent — just head back to the lobby
       // to search again, rather than silently starting a solo bot game in its place.
       if(this.online.unsub) this.online.unsub();
+      if(this.online.chatUnsub) this.online.chatUnsub();
       this.online = null;
       document.getElementById('gameBoard').remove();
       navigate('lobby');

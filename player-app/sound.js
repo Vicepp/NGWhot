@@ -38,6 +38,9 @@ const SoundEngine = {
       case 'win':    [523,659,784,1047].forEach((f,i) => this._tone(f, 0.3, 'sine', 0.35, i*160)); break;
       case 'lose':   [400,340,280,220].forEach((f,i) => this._tone(f, 0.2, 'sine', 0.4, i*200)); break;
       case 'out':    this._tone(220, 0.3, 'sawtooth', 0.5); break;
+      case 'warning':  this._tone(900, 0.18, 'triangle', 0.12); this._tone(900, 0.18, 'triangle', 0.12, 160); break;
+      case 'lastcard': [1000,800,1000].forEach((f,i) => this._tone(f, 0.22, 'square', 0.14, i*130)); break;
+      case 'checkup':  [600,500,600,500].forEach((f,i) => this._tone(f, 0.18, 'sine', 0.15, i*140)); break;
     }
   },
 
@@ -57,7 +60,10 @@ const SoundEngine = {
       holdon: 'Hold On!',
       whot:   'Whot!',
       win:    'We have a winner!',
-      out:    'Player Out!'
+      out:    'Player Out!',
+      warning:  'Two cards left!',
+      lastcard: 'Last card!',
+      checkup:  'Check up!'
     };
     this.play(type);
     if (lines[type]) setTimeout(() => this.speak(lines[type]), 100);
